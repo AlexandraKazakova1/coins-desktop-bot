@@ -46,17 +46,6 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("startTracking", async (evt, { url }) => {
-    try {
-      if (!url || typeof url !== "string") throw new Error("Вкажи URL товару.");
-      await bot.startTracking(url.trim());
-      return { ok: true };
-    } catch (e) {
-      sendStatus("Помилка", e.message);
-      return { ok: false, error: e.message };
-    }
-  });
-
   ipcMain.handle("stop", async () => {
     try {
       await bot.stop();
@@ -81,6 +70,17 @@ app.whenReady().then(() => {
 
   ipcMain.handle("getStatus", async () => {
     return { ok: true, state: bot.getState() };
+  });
+
+  ipcMain.handle("arm", async (_, payload) => {
+    try {
+      // запуск у фоні, не блокуємо UI
+      bot.arm(payload).catch((e) => sendStatus("Помилка", e.message));
+      return { ok: true };
+    } catch (e) {
+      sendStatus("Помилка", e.message);
+      return { ok: false, error: e.message };
+    }
   });
 });
 

@@ -1,9 +1,12 @@
 const $ = (id) => document.getElementById(id);
 
 const btnAuth = $("btnAuth");
-const btnStart = $("btnStart");
+const btnArm = $("btnArm");
 const btnStop = $("btnStop");
+
 const urlInput = $("url");
+const startAtInput = $("startAt");
+const prewarmInput = $("prewarm" || null);
 
 const dot = $("dot");
 const statusTitle = $("statusTitle");
@@ -12,12 +15,9 @@ const statusDetail = $("statusDetail");
 function setDot(status) {
   dot.className = "dot";
   if (status.includes("Помилка")) dot.classList.add("dot-red");
-  else if (status.includes("Очікую") || status.includes("Відкриваю"))
+  else if (status.includes("Очікую") || status.includes("Підготовка"))
     dot.classList.add("dot-yellow");
-  else if (status.includes("Натиснуто") || status.includes("доступна"))
-    dot.classList.add("dot-green");
-  else if (status.includes("Потрібна перевірка"))
-    dot.classList.add("dot-yellow");
+  else if (status.includes("Додано")) dot.classList.add("dot-green");
 }
 
 btnAuth.onclick = async () => {
@@ -29,9 +29,14 @@ btnAuth.onclick = async () => {
   }
 };
 
-btnStart.onclick = async () => {
-  const url = urlInput.value.trim();
-  const r = await window.api.startTracking({ url });
+btnArm.onclick = async () => {
+  const payload = {
+    url: urlInput.value.trim(),
+    startAtLocal: startAtInput.value || null,
+    prewarmSeconds: prewarmInput ? Number(prewarmInput.value || 0) : 0,
+  };
+
+  const r = await window.api.arm(payload);
   if (!r.ok) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = r.error || "";

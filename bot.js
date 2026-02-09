@@ -3,18 +3,15 @@ const path = require("path");
 const puppeteer = require("puppeteer-core");
 
 const BUY_SELECTOR = "button.btn-primary.buy";
-const POLL_MS = 50;
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function defaultChromePathsWin() {
-  const candidates = [
+function chromePaths() {
+  return [
     "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
     "C:\\\\Program Files (x86)\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
     path.join(
@@ -22,332 +19,204 @@ function defaultChromePathsWin() {
       "Google\\Chrome\\Application\\chrome.exe",
     ),
   ];
-  return candidates.filter(Boolean);
-}
-
-async function fileExists(p) {
-  try {
-    await fs.promises.access(p);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 class BotController {
   constructor({ profileDir, onStatus }) {
     this.profileDir = profileDir;
-    ensureDir(this.profileDir);
-
-    this.onStatus = onStatus || (() => {});
-    this.chromePath = null;
-
+    ensureDir(profileDir);
+    this.onStatus = onStatus;
     this.browser = null;
     this.page = null;
-
     this.tracking = false;
-    this.state = { status: "Готово", detail: "", url: "" };
   }
 
-  setChromePath(p) {
-    this.chromePath = p;
+  _status(s, d = "") {
+    this.onStatus(s, d);
   }
 
-  getState() {
-    return {
-      ...this.state,
-      tracking: this.tracking,
-      chromePath: this.chromePath,
-    };
-  }
+  async _browser() {
+    if (this.browser) return;
 
-  _setStatus(status, detail = "") {
-    this.state.status = status;
-    this.state.detail = detail;
-    this.onStatus(status, detail);
-  }
-
-  async _humanIdleActivity() {
-    if (!this.page) return;
-
-    // 50% шанс нічого не робити (людина може просто дивитись)
-    if (Math.random() < 0.5) {
-      await sleep(300 + Math.random() * 600);
-      return;
-    }
-
-    // невеликий скрол
-    const direction = Math.random() < 0.5 ? -1 : 1;
-    const delta = direction * (100 + Math.random() * 200);
-
-    await this.page.mouse.wheel({ deltaY: delta });
-    await sleep(200 + Math.random() * 400);
-
-    // іноді — рух миші
-    if (Math.random() < 0.6) {
-      const x = 100 + Math.random() * 600;
-      const y = 100 + Math.random() * 400;
-      await this.page.mouse.move(x, y, {
-        steps: 8 + Math.floor(Math.random() * 6),
-      });
-      await sleep(120 + Math.random() * 250);
-    }
-  }
-
-  async _resolveChromePath() {
-    if (this.chromePath && (await fileExists(this.chromePath)))
-      return this.chromePath;
-
-    for (const p of defaultChromePathsWin()) {
-      if (p && (await fileExists(p))) return p;
-    }
-    throw new Error(
-      "Не знайдено Chrome. Встанови Google Chrome (стандартний) або вкажи шлях до chrome.exe.",
-    );
-  }
-
-  async _ensureBrowser() {
-    if (this.browser && this.page) return;
-
-    const executablePath = await this._resolveChromePath();
-    this._setStatus("Запуск браузера", "Відкриваю Chrome...");
+    const chrome = chromePaths().find(fs.existsSync);
+    if (!chrome) throw new Error("Chrome не знайдено");
 
     this.browser = await puppeteer.launch({
       headless: false,
-      executablePath,
+      executablePath: chrome,
       userDataDir: this.profileDir,
       defaultViewport: null,
-      args: [
-        "--start-maximized",
-        // не додаємо жодних “stealth” трюків, тільки людська поведінка
-      ],
+      args: ["--start-maximized"],
     });
 
     const pages = await this.browser.pages();
-    this.page = pages[0] || (await this.browser.newPage());
+    this.page = pages[0];
+    if (!this.page || this.page.isClosed()) {
+      this.page = await this.browser.newPage();
+    }
 
-    // ВАЖЛИВО: знімаємо “webdriver” прапорець (це не обхід CAPTCHA, а зменшення тригеру automation)
     await this.page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
-
-    // Зробимо User-Agent як у звичайного Chrome (без "Headless")
-    const ua = await this.page.browser().userAgent();
-    await this.page.setUserAgent(ua.replace("HeadlessChrome", "Chrome"));
-
-    this.page.on("close", () => {
-      this.page = null;
-    });
-
-    this._setStatus("Готово", "Браузер запущено.");
   }
 
   async openAuth() {
-    await this._ensureBrowser();
-    this._setStatus(
+    await this._browser();
+
+    // Просто показуємо браузер і даємо тобі вручну зайти/перевірити сесію
+    await this.page.bringToFront();
+
+    const currentUrl = this.page.url() || "";
+
+    // Якщо вже на coins.bank.gov.ua — НЕ перезавантажуємо
+    if (currentUrl.includes("coins.bank.gov.ua")) {
+      this._status(
+        "Авторизація",
+        "Браузер відкрито. Якщо вже увійшла — нічого не роби.",
+      );
+      return;
+    }
+
+    // Інакше — відкриємо головну
+    this._status(
       "Авторизація",
-      "Увійди вручну на сайті у відкритому Chrome.",
+      "Відкриваю сайт. Увійди вручну, якщо потрібно.",
     );
     await this.page.goto("https://coins.bank.gov.ua/", {
       waitUntil: "domcontentloaded",
     });
-    await sleep(200);
-    await this._dismissCookieBannerIfAny();
   }
 
-  async _dismissCookieBannerIfAny() {
+  async _humanIdle() {
     if (!this.page) return;
-    await this.page.evaluate(() => {
-      const allow = document.querySelector("a.cc-btn.cc-allow");
-      const deny = document.querySelector("a.cc-btn.cc-deny");
-      const el = allow || deny;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) el.click();
-    });
-  }
 
-  async _isCloudflareOrTurnstileVisible() {
-    if (!this.page) return false;
-    return await this.page.evaluate(() => {
-      const t = (document.body?.innerText || "").toLowerCase();
-      const hasCfFrame = !!document.querySelector(
-        'iframe[src*="challenges.cloudflare.com"]',
-      );
-      const hasTurnstile = !!document.querySelector(
-        'iframe[title*="Turnstile"], .cf-turnstile, [data-sitekey]',
-      );
-      const hasError = t.includes("помилка") || t.includes("error");
-      return hasCfFrame || hasTurnstile || hasError;
-    });
-  }
-
-  async _buyButtonReady() {
-    if (!this.page) return false;
-    return await this.page.evaluate((sel) => {
-      const el = document.querySelector(sel);
-      if (!el) return false;
-      const r = el.getBoundingClientRect();
-      const visible = r.width > 0 && r.height > 0;
-      if (!visible) return false;
-      const disabled =
-        !!el.disabled || el.getAttribute("aria-disabled") === "true";
-      return !disabled;
-    }, BUY_SELECTOR);
-  }
-
-  // ---- “людські” дії ----
-
-  async _humanLikePause(minMs, maxMs) {
-    const ms = Math.floor(minMs + Math.random() * (maxMs - minMs));
-    await sleep(ms);
-  }
-
-  async _humanMoveAndClickHandle(handle) {
-    await this.page.bringToFront();
-    await this.page.focus("body");
-
-    const box = await handle.boundingBox();
-    if (!box) throw new Error("Не можу отримати boundingBox кнопки.");
-
-    // стартова позиція десь в межах вікна
-    const startX = 80 + Math.random() * 400;
-    const startY = 80 + Math.random() * 300;
-
-    await this.page.mouse.move(startX, startY, { steps: 5 });
-    await this._humanLikePause(80, 180);
-
-    const targetX = box.x + box.width / 2;
-    const targetY = box.y + box.height / 2;
-
-    // плавний рух до кнопки
-    const steps = 18 + Math.floor(Math.random() * 10);
-    await this.page.mouse.move(targetX, targetY, { steps });
-    await this._humanLikePause(120, 260);
-
-    await this.page.mouse.down();
-    await this._humanLikePause(40, 90);
-    await this.page.mouse.up();
-  }
-
-  async _humanScrollToHandle(handle) {
-    const y = await handle.evaluate(
-      (el) => el.getBoundingClientRect().top + window.scrollY,
-    );
-    const currentY = await this.page.evaluate(() => window.scrollY);
-
-    const delta = y - currentY - 220;
-    if (Math.abs(delta) > 10) {
-      await this.page.mouse.wheel({ deltaY: delta });
-      await this._humanLikePause(120, 260);
-    }
-  }
-
-  async _humanClickBuy() {
-    await this._dismissCookieBannerIfAny();
-
-    // маленька “людська” пауза перед дією
-    await this._humanLikePause(250, 650);
-
-    await this.page.waitForSelector(BUY_SELECTOR, {
-      visible: true,
-      timeout: 2000,
-    });
-    const btn = await this.page.$(BUY_SELECTOR);
-    if (!btn) throw new Error('Кнопку "Купити" не знайдено.');
-
-    // “людський” скрол
-    await this._humanScrollToHandle(btn);
-
-    // перевірка перекриття
-    const topOk = await btn.evaluate((el) => {
-      const r = el.getBoundingClientRect();
-      const x = r.left + r.width / 2;
-      const y = r.top + r.height / 2;
-      const top = document.elementFromPoint(x, y);
-      return top === el || el.contains(top);
-    });
-
-    if (!topOk) {
-      // fallback: все одно пробуємо мишкою по центру (після скролу координати вже правильні)
-      const box = await btn.boundingBox();
-      if (!box) throw new Error("Не можу отримати boundingBox кнопки.");
-      await this.page.mouse.click(
-        box.x + box.width / 2,
-        box.y + box.height / 2,
-        { clickCount: 1 },
-      );
+    // 60% часу — взагалі нічого не робимо
+    if (Math.random() < 0.6) {
+      await sleep(300 + Math.random() * 600);
       return;
     }
 
-    // основний клік “як людина”
-    await this._humanMoveAndClickHandle(btn);
+    // маленький “людський” скрол
+    const direction = Math.random() < 0.7 ? 1 : -1; // частіше вниз
+    const delta = direction * (80 + Math.random() * 140); // 80–220px
+
+    await this.page.mouse.wheel({ deltaY: delta });
+    await sleep(180 + Math.random() * 320);
   }
 
-  // ---- основний сценарій ----
+  async _fastClick() {
+    await this.page.waitForSelector(BUY_SELECTOR, {
+      visible: true,
+      timeout: 5000,
+    });
+    const btn = await this.page.$(BUY_SELECTOR);
+    if (!btn) throw new Error('Кнопку "Купити" не знайдено');
+    await btn.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await btn.click();
+  }
 
-  async startTracking(url) {
-    await this._ensureBrowser();
-    this.state.url = url;
+  async _waitAdded(timeout = 3000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      const ok = await this.page.evaluate(() =>
+        document.body.innerText.toLowerCase().includes("додано"),
+      );
+      if (ok) return true;
+      await sleep(80);
+    }
+    return false;
+  }
 
-    this.tracking = true;
-    this._setStatus("Відкриваю сторінку", url);
+  async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
+    if (!url) throw new Error("URL обовʼязковий");
 
-    await this.page.goto(url, { waitUntil: "domcontentloaded" });
-    await sleep(250);
-    await this._dismissCookieBannerIfAny();
+    const hasStartTime = !!startAtLocal;
 
-    this._setStatus('Очікую "Купити"', "Відстежую появу/активацію кнопки...");
+    await this._browser();
+    await this.page.bringToFront();
 
-    while (this.tracking) {
-      // якщо Cloudflare вже на екрані — нічого не робимо, чекаємо
-      if (await this._isCloudflareOrTurnstileVisible()) {
-        this._setStatus(
-          "Потрібна перевірка",
-          "Пройди Cloudflare вручну у браузері.",
-        );
-        await sleep(600);
-        continue;
-      }
+    // ====== РЕЖИМ БЕЗ ЧАСУ (STANDBY) ======
+    if (!hasStartTime) {
+      if (this.tracking)
+        throw new Error("Відстеження вже запущено. Натисни 'Зупинити'.");
 
-      const ready = await this._buyButtonReady();
+      this.tracking = true;
+      this._status("Standby", "Очікую появу/активацію кнопки “Купити”");
 
-      if (ready) {
-        this._setStatus('"Купити" доступна', "Клікаю...");
-        try {
-          await this._humanClickBuy();
-          this._setStatus(
-            "Натиснуто",
-            "Якщо зʼявилась перевірка — пройди вручну.",
-          );
-        } catch (e) {
-          this._setStatus("Помилка кліку", e.message);
+      await this.page.goto(url, { waitUntil: "domcontentloaded" });
+
+      while (this.tracking) {
+        // чекаємо появу кнопки
+        const btn = await this.page.$(BUY_SELECTOR);
+        if (btn) {
+          this._status("Кнопка доступна", "Клікаю");
+          await this._fastClick();
+
+          const added = await this._waitAdded();
+          if (added) {
+            this._status("Товар додано в кошик", "Готово ✅");
+            this.tracking = false;
+            return;
+          }
         }
 
-        // після кліку даємо сайту “подихати”
-        await sleep(350);
-      } else {
-        // 👇 “людська” активність ДО появи кнопки
-        await this._humanIdleActivity();
-
-        // коротка пауза між перевірками
-        await sleep(POLL_MS);
+        await this._humanIdle(); // людська активність до появи кнопки
+        await sleep(120);
       }
+
+      this._status("Зупинено", "");
+      return;
     }
 
-    this._setStatus("Зупинено", "");
+    // ====== РЕЖИМ З ЧАСОМ (ARM ПО ТЗ) ======
+    const startAt = new Date(startAtLocal).getTime();
+    if (!Number.isFinite(startAt))
+      throw new Error("Некоректна дата/час старту");
+
+    const openAt = startAt - Number(prewarmSeconds || 0) * 1000;
+
+    if (this.tracking)
+      throw new Error("Відстеження вже запущено. Натисни 'Зупинити'.");
+    this.tracking = true;
+
+    this._status("Озброєно", `Старт: ${new Date(startAt).toLocaleString()}`);
+
+    // чекаємо prewarm
+    while (this.tracking && Date.now() < openAt) {
+      await this._humanIdle();
+      await sleep(120);
+    }
+    if (!this.tracking) return;
+
+    this._status("Підготовка", "Відкриваю сторінку");
+    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+
+    // чекаємо точний старт
+    this._status("Очікую старт", new Date(startAt).toLocaleString());
+    while (this.tracking && Date.now() < startAt) {
+      await this._humanIdle();
+      await sleep(80);
+    }
+    if (!this.tracking) return;
+
+    this._status("Старт!", "Клікаю");
+    await this._fastClick();
+
+    const added = await this._waitAdded();
+    if (added) {
+      this._status("Товар додано в кошик", "Готово ✅");
+      this.tracking = false;
+    } else {
+      this._status("Не підтверджено", "Перевір кошик вручну");
+    }
   }
 
   async stop() {
     this.tracking = false;
-    if (this.browser) {
-      try {
-        await this.browser.close();
-      } catch {}
-    }
+    if (this.browser) await this.browser.close();
     this.browser = null;
     this.page = null;
-    this._setStatus("Готово", "Браузер закрито.");
+    this._status("Зупинено");
   }
 }
 
