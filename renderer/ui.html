@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>CoinsBot</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>CoinsBot</h1>
+
+      <div class="card">
+        <button id="btnAuth">Авторизація</button>
+
+        <label class="label">URL товару</label>
+        <input id="url" placeholder="Встав URL сторінки товару..." />
+
+        <div class="row">
+          <button id="btnStart">Почати відстеження</button>
+          <button id="btnStop" class="danger">Зупинити</button>
+        </div>
+
+        <div class="status">
+          <div class="dot" id="dot"></div>
+          <div>
+            <div class="statusTitle" id="statusTitle">Готово</div>
+            <div class="statusDetail" id="statusDetail"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="./ui.js"></script>
+  </body>
+</html>

@@ -1,0 +1,93 @@
+body {
+  font-family: system-ui, Arial, sans-serif;
+  background: #0b0f14;
+  color: #e8eef7;
+  margin: 0;
+}
+.wrap {
+  max-width: 520px;
+  margin: 18px auto;
+  padding: 0 14px;
+}
+h1 {
+  font-size: 22px;
+  margin: 0 0 12px;
+}
+.card {
+  background: #121a24;
+  border: 1px solid #223043;
+  border-radius: 12px;
+  padding: 14px;
+}
+.label {
+  display: block;
+  margin-top: 12px;
+  margin-bottom: 6px;
+  opacity: 0.9;
+}
+input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #2b3b52;
+  background: #0f1620;
+  color: #e8eef7;
+}
+button {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #2b3b52;
+  background: #182436;
+  color: #e8eef7;
+  cursor: pointer;
+}
+button:hover {
+  background: #1d2b41;
+}
+button.secondary {
+  margin-left: 8px;
+  opacity: 0.9;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+button.danger {
+  border-color: #6b2a2a;
+  background: #2a1212;
+}
+.status {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #223043;
+}
+.dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #5b6777;
+  margin-top: 4px;
+}
+.dot-yellow {
+  background: #d8b24c;
+}
+.dot-green {
+  background: #55c27a;
+}
+.dot-red {
+  background: #e05959;
+}
+.statusTitle {
+  font-weight: 700;
+}
+.statusDetail {
+  opacity: 0.85;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+}

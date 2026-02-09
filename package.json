@@ -1,0 +1,32 @@
+{
+  "name": "coins-desktop-bot",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "electron": "^31.0.0",
+    "puppeteer-core": "^23.5.3"
+  },
+  "devDependencies": {
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "ua.coins.desktopbot",
+    "productName": "CoinsBot",
+    "files": [
+      "main.js",
+      "preload.js",
+      "bot.js",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}
