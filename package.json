@@ -7,26 +7,38 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "build": "electron-builder"
   },
   "dependencies": {
-    "electron": "^31.0.0",
     "puppeteer-core": "^23.5.3"
   },
   "devDependencies": {
+    "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "ua.coins.desktopbot",
+    "appId": "com.alexandra.coinsbot",
     "productName": "CoinsBot",
+    "directories": {
+      "output": "dist"
+    },
     "files": [
-      "main.js",
-      "preload.js",
-      "bot.js",
-      "renderer/**/*"
+      "**/*",
+      "!node_modules/*/{CHANGELOG.md,README.md,README,readme.md}",
+      "!node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!node_modules/.bin",
+      "!node_modules/electron/dist/**",
+      "!chrome-profile/**"
     ],
     "win": {
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     }
   }
 }

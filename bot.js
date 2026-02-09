@@ -115,17 +115,17 @@ class BotController {
     await btn.click();
   }
 
-  async _waitAdded(timeout = 3000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeout) {
-      const ok = await this.page.evaluate(() =>
-        document.body.innerText.toLowerCase().includes("додано"),
-      );
-      if (ok) return true;
-      await sleep(80);
-    }
-    return false;
-  }
+  // async _waitAdded(timeout = 3000) {
+  //   const t0 = Date.now();
+  //   while (Date.now() - t0 < timeout) {
+  //     const ok = await this.page.evaluate(() =>
+  //       document.body.innerText.toLowerCase().includes("додано"),
+  //     );
+  //     if (ok) return true;
+  //     await sleep(80);
+  //   }
+  //   return false;
+  // }
 
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
@@ -150,13 +150,15 @@ class BotController {
         const btn = await this.page.$(BUY_SELECTOR);
         if (btn) {
           this._status("Кнопка доступна", "Клікаю");
+          const before = await this._getCartCount();
           await this._fastClick();
+          const added = await this._waitAddedByCartCount(before, 6000);
 
-          const added = await this._waitAdded();
           if (added) {
             this._status("Товар додано в кошик", "Готово ✅");
             this.tracking = false;
-            return;
+          } else {
+            this._status("Не підтверджено", "Перевір кошик вручну");
           }
         }
 
@@ -217,6 +219,59 @@ class BotController {
     this.browser = null;
     this.page = null;
     this._status("Зупинено");
+  }
+
+  async _getCartCount() {
+    if (!this.page) return null;
+
+    return await this.page.evaluate(() => {
+      // Спробуємо знайти лічильник біля іконки кошика
+      const cartLink =
+        document.querySelector('a[aria-label="кошик"]') ||
+        document.querySelector('a.small-wrap-a[aria-label="кошик"]') ||
+        document.querySelector('a[href*="cart"], a[href*="kosik"]');
+
+      const texts = [];
+
+      if (cartLink) texts.push(cartLink.textContent || "");
+      // часті варіанти бейджа
+      const badge =
+        document.querySelector(".cart_count") ||
+        document.querySelector(".cart-count") ||
+        document.querySelector(".cart__count") ||
+        (cartLink ? cartLink.querySelector("span") : null);
+
+      if (badge) texts.push(badge.textContent || "");
+
+      const joined = texts.join(" ").replace(/\s+/g, " ").trim();
+      const m = joined.match(/(\d+)/);
+      return m ? Number(m[1]) : 0; // якщо не знайшли — вважаємо 0
+    });
+  }
+
+  async _waitAddedByCartCount(beforeCount, timeout = 5000) {
+    const t0 = Date.now();
+
+    while (Date.now() - t0 < timeout) {
+      // 1) Найнадійніше: лічильник кошика зріс
+      const nowCount = await this._getCartCount();
+      if (typeof nowCount === "number" && typeof beforeCount === "number") {
+        if (nowCount > beforeCount) return true;
+      }
+
+      // 2) Fallback: toast/текст “додано … кошик”
+      const toastLike = await this.page.evaluate(() => {
+        const t = (document.body?.innerText || "").toLowerCase();
+        return (
+          t.includes("додано") && (t.includes("кошик") || t.includes("корзин"))
+        );
+      });
+      if (toastLike) return true;
+
+      await sleep(120);
+    }
+
+    return false;
   }
 }
 

@@ -1,5 +1,6 @@
 const path = require("path");
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+
 const { BotController } = require("./bot");
 
 let win;
@@ -19,6 +20,19 @@ function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, "renderer", "ui.html"));
+
+  win.webContents.on("context-menu", (event, params) => {
+    const template = [
+      { role: "cut", enabled: params.editFlags.canCut },
+      { role: "copy", enabled: params.editFlags.canCopy },
+      { role: "paste", enabled: params.editFlags.canPaste },
+      { type: "separator" },
+      { role: "selectAll" },
+    ];
+
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({ window: win });
+  });
 }
 
 function sendStatus(status, detail = "") {
