@@ -6,18 +6,18 @@ const btnStop = $("btnStop");
 
 const urlInput = $("url");
 const startAtInput = $("startAt");
+const prewarmInput = $("prewarm" || null);
+
 const dot = $("dot");
 const statusTitle = $("statusTitle");
 const statusDetail = $("statusDetail");
 
 function setDot(status) {
-  const normalized = (status || "").toLowerCase();
-
   dot.className = "dot";
-  if (normalized.includes("помилка")) dot.classList.add("dot-red");
-  else if (normalized.includes("очікую") || normalized.includes("підготовка") || normalized.includes("standby") || normalized.includes("озброєно"))
+  if (status.includes("Помилка")) dot.classList.add("dot-red");
+  else if (status.includes("Очікую") || status.includes("Підготовка"))
     dot.classList.add("dot-yellow");
-  else if (normalized.includes("додано")) dot.classList.add("dot-green");
+  else if (status.includes("Додано")) dot.classList.add("dot-green");
 }
 
 btnAuth.onclick = async () => {
