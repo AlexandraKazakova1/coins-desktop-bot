@@ -2,7 +2,13 @@ const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer-core");
 
-const BUY_SELECTOR = "button.btn-primary.buy";
+const BUY_SELECTORS = [
+  "button.btn-primary.buy",
+  "button.buy",
+  "button:contains('Купити')",
+  "button:contains('купити')",
+  "button[aria-label*='куп']",
+];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -33,6 +39,23 @@ class BotController {
 
   _status(s, d = "") {
     this.onStatus(s, d);
+  }
+
+  async _findBuyButton() {
+    for (const sel of BUY_SELECTORS) {
+      const el = await this.page.$(sel);
+      if (el) return el;
+    }
+
+    // fallback по тексту
+    const handle = await this.page.evaluateHandle(() => {
+      const btns = [...document.querySelectorAll("button")];
+      return (
+        btns.find((b) => b.innerText?.toLowerCase().includes("купити")) || null
+      );
+    });
+
+    return handle.asElement();
   }
 
   async _browser() {
@@ -109,7 +132,7 @@ class BotController {
       visible: true,
       timeout: 5000,
     });
-    const btn = await this.page.$(BUY_SELECTOR);
+    const btn = await this._findBuyButton();
     if (!btn) throw new Error('Кнопку "Купити" не знайдено');
     await btn.evaluate((el) => el.scrollIntoView({ block: "center" }));
     await btn.click();
@@ -150,6 +173,7 @@ class BotController {
         const btn = await this.page.$(BUY_SELECTOR);
         if (btn) {
           this._status("Кнопка доступна", "Клікаю");
+
           const before = await this._getCartCount();
           await this._fastClick();
           const added = await this._waitAddedByCartCount(before, 6000);
@@ -212,13 +236,16 @@ class BotController {
       this._status("Не підтверджено", "Перевір кошик вручну");
     }
   }
-
+  async softStop() {
+    this.tracking = false;
+    this._status("Зупинено", "Відстеження припинено");
+  }
   async stop() {
     this.tracking = false;
     if (this.browser) await this.browser.close();
     this.browser = null;
     this.page = null;
-    this._status("Зупинено");
+    this._status("Готово", "Браузер закрито");
   }
 
   async _getCartCount() {

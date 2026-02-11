@@ -4,5 +4,9 @@ contextBridge.exposeInMainWorld("api", {
   auth: () => ipcRenderer.invoke("auth"),
   arm: (payload) => ipcRenderer.invoke("arm", payload),
   stop: () => ipcRenderer.invoke("stop"),
-  onStatus: (cb) => ipcRenderer.on("status", (_, data) => cb(data)),
+  onStatus: (cb) => {
+    const handler = (_, data) => cb(data);
+    ipcRenderer.on("status", handler);
+    return () => ipcRenderer.removeListener("status", handler);
+  },
 });

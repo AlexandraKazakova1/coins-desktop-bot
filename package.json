@@ -8,7 +8,9 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "lint": "eslint .",
+    "test": "node --test"
   },
   "dependencies": {
     "puppeteer-core": "^23.5.3"

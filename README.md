@@ -1,4 +1,19 @@
-Інструкція користувача
+## Development
+
+npm install
+npm start
+
+## Build
+
+npm run build
+
+## Troubleshooting
+
+- Якщо не відкривається Chrome...
+- Якщо GitHub блокує push...
+
+## Інструкція користувача
+
 CoinsBot — напівавтоматичний бот покупки
 
 1. Що це за програма

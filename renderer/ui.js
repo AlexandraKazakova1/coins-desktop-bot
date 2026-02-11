@@ -33,7 +33,6 @@ btnArm.onclick = async () => {
   const payload = {
     url: urlInput.value.trim(),
     startAtLocal: startAtInput.value || null,
-    prewarmSeconds: prewarmInput ? Number(prewarmInput.value || 0) : 0,
   };
 
   const r = await window.api.arm(payload);

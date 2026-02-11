@@ -70,18 +70,6 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("chooseChrome", async () => {
-    const res = await dialog.showOpenDialog(win, {
-      title: "Вибери chrome.exe",
-      properties: ["openFile"],
-      filters: [{ name: "Chrome", extensions: ["exe"] }],
-    });
-    if (res.canceled || !res.filePaths?.[0]) return { ok: false };
-    bot.setChromePath(res.filePaths[0]);
-    sendStatus("Готово", "Шлях до Chrome задано.");
-    return { ok: true, path: res.filePaths[0] };
-  });
-
   ipcMain.handle("getStatus", async () => {
     return { ok: true, state: bot.getState() };
   });
