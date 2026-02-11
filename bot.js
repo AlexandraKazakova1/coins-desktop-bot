@@ -5,8 +5,7 @@ const puppeteer = require("puppeteer-core");
 const BUY_SELECTORS = [
   "button.btn-primary.buy",
   "button.buy",
-  "button:contains('Купити')",
-  "button:contains('купити')",
+  "button[class*='buy']",
   "button[aria-label*='куп']",
 ];
 
@@ -44,14 +43,24 @@ class BotController {
   async _findBuyButton() {
     for (const sel of BUY_SELECTORS) {
       const el = await this.page.$(sel);
-      if (el) return el;
+      if (!el) continue;
+
+      const enabled = await el.evaluate(
+        (button) => !button.disabled && button.getAttribute("aria-disabled") !== "true",
+      );
+
+      if (enabled) return el;
     }
 
     // fallback по тексту
     const handle = await this.page.evaluateHandle(() => {
       const btns = [...document.querySelectorAll("button")];
       return (
-        btns.find((b) => b.innerText?.toLowerCase().includes("купити")) || null
+        btns.find((b) => {
+          const text = b.innerText?.toLowerCase() || "";
+          const disabled = b.disabled || b.getAttribute("aria-disabled") === "true";
+          return text.includes("купити") && !disabled;
+        }) || null
       );
     });
 
@@ -128,11 +137,14 @@ class BotController {
   }
 
   async _fastClick() {
-    await this.page.waitForSelector(BUY_SELECTOR, {
-      visible: true,
-      timeout: 5000,
-    });
-    const btn = await this._findBuyButton();
+    const timeoutAt = Date.now() + 5000;
+    let btn = null;
+
+    while (!btn && Date.now() < timeoutAt) {
+      btn = await this._findBuyButton();
+      if (!btn) await sleep(120);
+    }
+
     if (!btn) throw new Error('Кнопку "Купити" не знайдено');
     await btn.evaluate((el) => el.scrollIntoView({ block: "center" }));
     await btn.click();
@@ -168,9 +180,11 @@ class BotController {
 
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
 
+      let addedToCart = false;
+
       while (this.tracking) {
         // чекаємо появу кнопки
-        const btn = await this.page.$(BUY_SELECTOR);
+        const btn = await this._findBuyButton();
         if (btn) {
           this._status("Кнопка доступна", "Клікаю");
 
@@ -180,9 +194,10 @@ class BotController {
 
           if (added) {
             this._status("Товар додано в кошик", "Готово ✅");
+            addedToCart = true;
             this.tracking = false;
           } else {
-            this._status("Не підтверджено", "Перевір кошик вручну");
+            this._status("Потрібна перевірка", "Перевір кошик вручну");
           }
         }
 
@@ -190,7 +205,9 @@ class BotController {
         await sleep(120);
       }
 
-      this._status("Зупинено", "");
+      if (!addedToCart) {
+        this._status("Зупинено", "");
+      }
       return;
     }
 
@@ -226,14 +243,15 @@ class BotController {
     if (!this.tracking) return;
 
     this._status("Старт!", "Клікаю");
+    const before = await this._getCartCount();
     await this._fastClick();
 
-    const added = await this._waitAdded();
+    const added = await this._waitAddedByCartCount(before, 6000);
     if (added) {
       this._status("Товар додано в кошик", "Готово ✅");
       this.tracking = false;
     } else {
-      this._status("Не підтверджено", "Перевір кошик вручну");
+      this._status("Потрібна перевірка", "Перевір кошик вручну");
     }
   }
   async softStop() {
