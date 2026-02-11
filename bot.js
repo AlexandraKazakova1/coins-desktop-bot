@@ -5,8 +5,7 @@ const puppeteer = require("puppeteer-core");
 const BUY_SELECTORS = [
   "button.btn-primary.buy",
   "button.buy",
-  "button:contains('Купити')",
-  "button:contains('купити')",
+  "button[class*='buy']",
   "button[aria-label*='куп']",
 ];
 
@@ -44,14 +43,24 @@ class BotController {
   async _findBuyButton() {
     for (const sel of BUY_SELECTORS) {
       const el = await this.page.$(sel);
-      if (el) return el;
+      if (!el) continue;
+
+      const enabled = await el.evaluate(
+        (button) => !button.disabled && button.getAttribute("aria-disabled") !== "true",
+      );
+
+      if (enabled) return el;
     }
 
     // fallback по тексту
     const handle = await this.page.evaluateHandle(() => {
       const btns = [...document.querySelectorAll("button")];
       return (
-        btns.find((b) => b.innerText?.toLowerCase().includes("купити")) || null
+        btns.find((b) => {
+          const text = b.innerText?.toLowerCase() || "";
+          const disabled = b.disabled || b.getAttribute("aria-disabled") === "true";
+          return text.includes("купити") && !disabled;
+        }) || null
       );
     });
 
@@ -172,6 +181,8 @@ class BotController {
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
       let addedToCart = false;
 
+      let addedToCart = false;
+
       while (this.tracking) {
         // чекаємо появу кнопки
         const btn = await this._findBuyButton();
@@ -193,6 +204,7 @@ class BotController {
         await this._humanIdle(); // людська активність до появи кнопки
         await sleep(120);
       }
+
       if (!addedToCart) {
         this._status("Зупинено", "");
       }
