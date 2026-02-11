@@ -179,6 +179,7 @@ class BotController {
       this._status("Standby", "Очікую появу/активацію кнопки “Купити”");
 
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
+      let addedToCart = false;
 
       let addedToCart = false;
 
@@ -200,7 +201,6 @@ class BotController {
             this._status("Потрібна перевірка", "Перевір кошик вручну");
           }
         }
-
         await this._humanIdle(); // людська активність до появи кнопки
         await sleep(120);
       }
