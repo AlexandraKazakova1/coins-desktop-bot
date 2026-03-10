@@ -5,9 +5,12 @@ const puppeteer = require("puppeteer-core");
 const BUY_SELECTORS = [
   "button.btn-primary.buy",
   "button.buy",
-  "button:contains('Купити')",
-  "button:contains('купити')",
-  "button[aria-label*='куп']",
+  "button[aria-label*='куп' i]",
+  "a.btn-primary.buy",
+  "a.buy",
+  "a[aria-label*='куп' i]",
+  "[data-action*='buy' i]",
+  "[class*='buy' i]",
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -70,12 +73,30 @@ class BotController {
       }
     }
 
-    // fallback по тексту
+    // fallback по тексту (button/a/div[role=button])
     const handle = await this.page.evaluateHandle(() => {
-      const btns = [...document.querySelectorAll("button")];
-      return (
-        btns.find((b) => b.innerText?.toLowerCase().includes("купити")) || null
-      );
+      const candidates = [
+        ...document.querySelectorAll("button, a, [role='button']"),
+      ];
+
+      const byText = candidates.find((el) => {
+        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        return (
+          t.includes("купити") || t.includes("в кошик") || t.includes("buy")
+        );
+      });
+
+      if (byText) return byText;
+
+      // Частий випадок — span всередині кнопки
+      const span = [...document.querySelectorAll("span")].find((el) => {
+        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        return (
+          t.includes("купити") || t.includes("в кошик") || t.includes("buy")
+        );
+      });
+
+      return span?.closest("button, a, [role='button']") || null;
     });
 
     return handle.asElement();
@@ -176,8 +197,25 @@ class BotController {
     }
 
     if (!btn) throw new Error('Кнопку "Купити" не знайдено');
-    await btn.evaluate((el) => el.scrollIntoView({ block: "center" }));
-    await btn.click();
+    await btn.evaluate((el) =>
+      el.scrollIntoView({ block: "center", inline: "center" }),
+    );
+    await sleep(80);
+
+    try {
+      await btn.click({ delay: 20 });
+      return;
+    } catch {
+      const box = await btn.boundingBox();
+      if (!box) throw new Error('Кнопка "Купити" не клікабельна');
+      await this.page.mouse.click(
+        box.x + box.width / 2,
+        box.y + box.height / 2,
+        {
+          delay: 20,
+        },
+      );
+    }
   }
 
   // async _waitAdded(timeout = 3000) {
@@ -250,6 +288,7 @@ class BotController {
             this.tracking = false;
           } else if (result === "captcha") {
             this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
+            this.tracking = false;
           } else {
             this._status("Потрібна перевірка", "Перевір кошик вручну");
           }
@@ -350,6 +389,37 @@ class BotController {
     });
   }
 
+  async _isInCartStateVisible() {
+    if (!this.page) return false;
+
+    return this.page.evaluate(() => {
+      const text = (document.body?.innerText || "").toLowerCase();
+      const addedPhrases = [
+        "додано до кошика",
+        "додано в кошик",
+        "товар у кошику",
+        "у кошику",
+        "в кошику",
+        "перейти до кошика",
+      ];
+
+      if (addedPhrases.some((phrase) => text.includes(phrase))) return true;
+
+      const controls = [
+        ...document.querySelectorAll("button, a, [role='button']"),
+      ];
+
+      return controls.some((el) => {
+        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        return (
+          t.includes("у кошику") ||
+          t.includes("в кошику") ||
+          t.includes("перейти до кошика")
+        );
+      });
+    });
+  }
+
   async _waitAddedByCartCount(beforeCount, timeout = 5000) {
     const t0 = Date.now();
 
@@ -364,10 +434,16 @@ class BotController {
       const toastLike = await this.page.evaluate(() => {
         const t = (document.body?.innerText || "").toLowerCase();
         return (
-          t.includes("додано") && (t.includes("кошик") || t.includes("корзин"))
+          (t.includes("додано") &&
+            (t.includes("кошик") || t.includes("корзин"))) ||
+          t.includes("додано до кошика") ||
+          t.includes("додано в кошик")
         );
       });
       if (toastLike) return "added";
+
+      const inCartState = await this._isInCartStateVisible();
+      if (inCartState) return "added";
 
       const captchaNeeded = await this._hasCaptcha();
       if (captchaNeeded) return "captcha";

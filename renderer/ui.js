@@ -35,8 +35,8 @@ function playAudioWithFallback(sources) {
 
 function playAlert(kind) {
   const sourcesByKind = {
-    captcha: ["./sounds/alert.mp3", "./sounds/captcha-alert.wav"],
-    added: ["./sounds/alert.mp3", "./sounds/cart-added.wav"],
+    captcha: ["/sounds/success.mp3", "./sounds/captcha-alert.wav"],
+    added: ["/sounds/success.mp3", "./sounds/cart-added.wav"],
   };
 
   const sources = sourcesByKind[kind];
@@ -48,7 +48,10 @@ function playAlert(kind) {
 function maybePlayStatusSound(status) {
   const normalized = (status || "").toLowerCase();
 
-  if (normalized.includes("потрібно ввести капчу")) {
+  if (
+    normalized.includes("потрібно ввести капчу") ||
+    normalized.includes("введи капчу")
+  ) {
     if (lastSoundEvent !== "captcha") {
       playAlert("captcha");
       lastSoundEvent = "captcha";
@@ -56,7 +59,11 @@ function maybePlayStatusSound(status) {
     return;
   }
 
-  if (normalized.includes("товар додано в кошик")) {
+  if (
+    normalized.includes("товар додано в кошик") ||
+    normalized.includes("додано в кошик") ||
+    normalized.includes("додано до кошика")
+  ) {
     if (lastSoundEvent !== "added") {
       playAlert("added");
       lastSoundEvent = "added";
