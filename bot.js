@@ -218,12 +218,14 @@ class BotController {
 
           const before = await this._getCartCount();
           await this._fastClick();
-          const added = await this._waitAddedByCartCount(before, 6000);
+          const result = await this._waitAddedByCartCount(before, 6000);
 
-          if (added) {
+          if (result === "added") {
             this._status("Товар додано в кошик", "Готово ✅");
             addedToCart = true;
             this.tracking = false;
+          } else if (result === "captcha") {
+            this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
           } else {
             this._status("Потрібна перевірка", "Перевір кошик вручну");
           }
@@ -272,10 +274,12 @@ class BotController {
     const before = await this._getCartCount();
     await this._fastClick();
 
-    const added = await this._waitAddedByCartCount(before, 6000);
-    if (added) {
+    const result = await this._waitAddedByCartCount(before, 6000);
+    if (result === "added") {
       this._status("Товар додано в кошик", "Готово ✅");
       this.tracking = false;
+    } else if (result === "captcha") {
+      this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
     } else {
       this._status("Потрібна перевірка", "Перевір кошик вручну");
     }
@@ -327,7 +331,7 @@ class BotController {
       // 1) Найнадійніше: лічильник кошика зріс
       const nowCount = await this._getCartCount();
       if (typeof nowCount === "number" && typeof beforeCount === "number") {
-        if (nowCount > beforeCount) return true;
+        if (nowCount > beforeCount) return "added";
       }
 
       // 2) Fallback: toast/текст “додано … кошик”
@@ -337,12 +341,43 @@ class BotController {
           t.includes("додано") && (t.includes("кошик") || t.includes("корзин"))
         );
       });
-      if (toastLike) return true;
+      if (toastLike) return "added";
+
+      const captchaNeeded = await this._hasCaptcha();
+      if (captchaNeeded) return "captcha";
 
       await sleep(120);
     }
 
-    return false;
+    return "unknown";
+  }
+
+  async _hasCaptcha() {
+    if (!this.page) return false;
+
+    return this.page.evaluate(() => {
+      const bodyText = (document.body?.innerText || "").toLowerCase();
+      if (bodyText.includes("капч")) return true;
+
+      const selectors = [
+        "iframe[src*='captcha']",
+        "div.g-recaptcha",
+        "textarea[name='g-recaptcha-response']",
+        "input[name*='captcha']",
+        "img[alt*='captcha' i]",
+      ];
+
+      return selectors.some((selector) => !!document.querySelector(selector));
+    });
+  }
+
+  getState() {
+    return {
+      tracking: this.tracking,
+      hasBrowser: !!this.browser,
+      hasPage: !!this.page && this.page.isClosed?.() !== true,
+      pageUrl: this.page?.url?.() || null,
+    };
   }
 }
 
