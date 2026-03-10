@@ -29,6 +29,22 @@ const BOT_STATES = {
   PAGE_CLOSED: "PAGE_CLOSED",
 };
 
+const STATE_EVENT_CODE = {
+  [BOT_STATES.READY]: "ready",
+  [BOT_STATES.AUTH]: "auth",
+  [BOT_STATES.WAIT_BUY]: "wait_buy",
+  [BOT_STATES.TRY_ADD]: "try_add",
+  [BOT_STATES.ARMED]: "armed",
+  [BOT_STATES.PREPARE]: "prepare",
+  [BOT_STATES.WAIT_START]: "wait_start",
+  [BOT_STATES.ADDED]: "added_to_cart",
+  [BOT_STATES.WAIT_CAPTCHA]: "captcha_required",
+  [BOT_STATES.STOPPED]: "stopped",
+  [BOT_STATES.ERROR]: "error",
+  [BOT_STATES.DISCONNECTED]: "disconnected",
+  [BOT_STATES.PAGE_CLOSED]: "page_closed",
+};
+
 const STATUS_MAP = {
   [BOT_STATES.READY]: { title: "Готово", detail: "Браузер закрито" },
   [BOT_STATES.AUTH]: { title: "Авторизація" },
@@ -66,6 +82,9 @@ const STATUS_MAP = {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const randomBetween = (min, max) =>
+  Math.floor(min + Math.random() * (max - min + 1));
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -93,13 +112,15 @@ class BotController {
     this.state = BOT_STATES.READY;
   }
 
-  _status(state, detailOverride = "") {
+  _status(state, detailOverride = "", eventCodeOverride = "") {
     if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
 
     const message = STATUS_MAP[state] || { title: state, detail: "" };
     const detail = detailOverride || message.detail || "";
+    const eventCode =
+      eventCodeOverride || STATE_EVENT_CODE[state] || "status_update";
     this.state = state;
-    this.onStatus(message.title, detail);
+    this.onStatus(message.title, detail, eventCode);
   }
 
   async _focusCoinsTab() {
@@ -240,33 +261,60 @@ class BotController {
   }
 
   async _fastClick() {
+    const foundAt = Date.now();
     const timeoutAt = Date.now() + 5000;
     let btn = null;
 
     while (!btn && Date.now() < timeoutAt) {
       btn = await this._findBuyButton();
-      if (!btn) await sleep(120);
+      if (!btn) await sleep(50);
     }
 
     if (!btn) throw new Error('Кнопку "Купити" не знайдено');
+    const buttonSeenAt = Date.now();
     await btn.evaluate((el) =>
       el.scrollIntoView({ block: "center", inline: "center" }),
     );
-    await sleep(80);
+    await sleep(30);
 
-    try {
-      await btn.click({ delay: 20 });
-      return;
-    } catch {
-      const box = await btn.boundingBox();
-      if (!box) throw new Error('Кнопка "Купити" не клікабельна');
-      await this.page.mouse.click(
-        box.x + box.width / 2,
-        box.y + box.height / 2,
-        {
-          delay: 20,
-        },
-      );
+    await this._clickWithQuickRetries(btn, 3);
+
+    const clickSentAt = Date.now();
+    console.log(
+      `[timing] button_seen=${new Date(buttonSeenAt).toISOString()} click_sent=${new Date(clickSentAt).toISOString()} delay_ms=${clickSentAt - buttonSeenAt} wait_to_find_ms=${buttonSeenAt - foundAt}`,
+    );
+  }
+
+  async _clickWithQuickRetries(btn, maxAttempts = 3) {
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await btn.click({ delay: 10 });
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+
+      try {
+        const box = await btn.boundingBox();
+        if (box) {
+          await this.page.mouse.click(
+            box.x + box.width / 2,
+            box.y + box.height / 2,
+            {
+              delay: 10,
+            },
+          );
+          return;
+        }
+      } catch (err) {
+        lastError = err;
+      }
+
+      if (attempt < maxAttempts) {
+        await sleep(randomBetween(100, 300));
+      }
     }
   }
 
@@ -282,7 +330,7 @@ class BotController {
   //   return false;
   // }
   async _ensurePage() {
-    await this._browser(); // має підняти this.browser / this.page або хоча б this.browser
+    await this._browser();
 
     // Якщо page не існує або закрита — створюємо нову
     if (!this.page || this.page.isClosed?.() === true) {
@@ -351,7 +399,7 @@ class BotController {
         await this._humanIdle(); // людська активність до появи кнопки
         await sleep(120);
       }
-      if (!addedToCart) {
+      if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
         this._status(BOT_STATES.STOPPED);
       }
       return;
@@ -386,8 +434,7 @@ class BotController {
     // чекаємо точний старт
     this._status(BOT_STATES.WAIT_START, new Date(startAt).toLocaleString());
     while (this.tracking && Date.now() < startAt) {
-      await this._humanIdle();
-      await sleep(80);
+      await sleep(randomBetween(30, 80));
     }
     if (!this.tracking) return;
 
@@ -555,6 +602,7 @@ class BotController {
     this._status(
       "Очікує підтвердження Cloudflare",
       "Пройди challenge вручну. Я продовжу автоматично.",
+      "captcha_required",
     );
 
     while (this.tracking && this.waitingCaptcha) {
@@ -574,13 +622,18 @@ class BotController {
       this._status(
         "Повторна спроба після Cloudflare",
         `Спроба ${attempt}/3: повторно натискаю “Купити”`,
+        "retry_after_cloudflare",
       );
 
       await sleep(100 + Math.floor(Math.random() * 201));
       try {
         await this._fastClick();
       } catch (e) {
-        this._status("Повторна спроба після Cloudflare", String(e));
+        this._status(
+          "Повторна спроба після Cloudflare",
+          String(e),
+          "retry_after_cloudflare",
+        );
         continue;
       }
 
@@ -591,6 +644,7 @@ class BotController {
         this._status(
           "Очікує підтвердження Cloudflare",
           "Challenge зʼявився знову. Пройди його вручну.",
+          "captcha_required",
         );
 
         while (this.tracking && this.waitingCaptcha) {

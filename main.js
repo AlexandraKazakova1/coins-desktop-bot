@@ -35,9 +35,9 @@ function createWindow() {
   });
 }
 
-function sendStatus(status, detail = "") {
+function sendStatus(status, detail = "", eventCode = "") {
   if (!win) return;
-  win.webContents.send("status", { status, detail, ts: Date.now() });
+  win.webContents.send("status", { status, detail, eventCode, ts: Date.now() });
 }
 
 app.whenReady().then(() => {
@@ -45,7 +45,7 @@ app.whenReady().then(() => {
 
   bot = new BotController({
     profileDir: path.join(app.getPath("userData"), "chrome-profile"),
-    onStatus: (s, d) => sendStatus(s, d),
+    onStatus: (s, d, e) => sendStatus(s, d, e),
   });
 
   // --- IPC API ---
@@ -55,7 +55,7 @@ app.whenReady().then(() => {
       await bot.openAuth();
       return { ok: true };
     } catch (e) {
-      sendStatus("Помилка", e.message);
+      sendStatus("Помилка", e.message, "error");
       return { ok: false, error: e.message };
     }
   });
@@ -65,7 +65,7 @@ app.whenReady().then(() => {
       await bot.stop();
       return { ok: true };
     } catch (e) {
-      sendStatus("Помилка", e.message);
+      sendStatus("Помилка", e.message, "error");
       return { ok: false, error: e.message };
     }
   });
@@ -77,10 +77,9 @@ app.whenReady().then(() => {
   ipcMain.handle("arm", async (_, payload) => {
     try {
       // запуск у фоні, не блокуємо UI
-      bot.arm(payload).catch((e) => sendStatus("Помилка", e.message));
-      return { ok: true };
+      bot.arm(payload).catch((e) => sendStatus("Помилка", e.message, "error"));
     } catch (e) {
-      sendStatus("Помилка", e.message);
+      sendStatus("Помилка", e.message, "error");
       return { ok: false, error: e.message };
     }
   });

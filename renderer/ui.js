@@ -29,66 +29,32 @@ const STATUS_COLOR = {
   "Page closed": "error",
 };
 
-function playAudioWithFallback(sources) {
-  const [current, ...rest] = sources;
-  if (!current) return;
-
-  const audio = new Audio(current);
-  audio.volume = 0.8;
-
-  audio.addEventListener(
-    "error",
-    () => {
-      if (rest.length) playAudioWithFallback(rest);
-    },
-    { once: true },
-  );
-
-  audio.play().catch(() => {
-    if (rest.length) playAudioWithFallback(rest);
-  });
-}
+const ALERT_SOUND_SRC = "./sounds/success.mp3";
 
 function playAlert(kind) {
-  const sourcesByKind = {
-    captcha: ["/sounds/success.mp3", "./sounds/captcha-alert.wav"],
-    added: ["/sounds/success.mp3", "./sounds/cart-added.wav"],
-  };
+  if (!kind) return;
 
-  const sources = sourcesByKind[kind];
-  if (!sources) return;
-
-  playAudioWithFallback(sources);
+  const audio = new Audio(ALERT_SOUND_SRC);
+  audio.volume = 0.8;
+  audio.play().catch(() => {});
 }
 
-function maybePlayStatusSound(status) {
-  const normalized = (status || "").toLowerCase();
+function maybePlayStatusSound(eventCode) {
+  const soundByEventCode = {
+    captcha_required: "captcha",
+    added_to_cart: "added",
+  };
 
-  if (
-    normalized.includes("потрібно ввести капчу") ||
-    normalized.includes("введи капчу")
-  ) {
-    if (lastSoundEvent !== "captcha") {
-      playAlert("captcha");
-      lastSoundEvent = "captcha";
-    }
-    return;
-  }
+  const soundEvent = soundByEventCode[eventCode] || "";
 
-  if (
-    normalized.includes("товар додано в кошик") ||
-    normalized.includes("додано в кошик") ||
-    normalized.includes("додано до кошика")
-  ) {
-    if (lastSoundEvent !== "added") {
-      playAlert("added");
-      lastSoundEvent = "added";
-    }
-    return;
-  }
-
-  if (!normalized.includes("потрібно") && !normalized.includes("додано")) {
+  if (!soundEvent) {
     lastSoundEvent = "";
+    return;
+  }
+
+  if (lastSoundEvent !== soundEvent) {
+    playAlert(soundEvent);
+    lastSoundEvent = soundEvent;
   }
 }
 
@@ -111,6 +77,7 @@ btnAuth.onclick = async () => {
 };
 
 btnArm.onclick = async () => {
+  lastSoundEvent = "";
   const payload = {
     url: urlInput.value.trim(),
     startAtLocal: startAtInput.value || null,
@@ -128,9 +95,9 @@ btnStop.onclick = async () => {
   await window.api.stop();
 };
 
-window.api.onStatus(({ status, detail }) => {
+window.api.onStatus(({ status, detail, eventCode }) => {
   statusTitle.textContent = status;
   statusDetail.textContent = detail || "";
   setDot(status);
-  maybePlayStatusSound(status);
+  maybePlayStatusSound(eventCode);
 });
