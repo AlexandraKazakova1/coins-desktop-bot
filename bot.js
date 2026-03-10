@@ -13,6 +13,57 @@ const BUY_SELECTORS = [
   "[class*='buy' i]",
 ];
 
+const BOT_STATES = {
+  READY: "READY",
+  AUTH: "AUTH",
+  WAIT_BUY: "WAIT_BUY",
+  TRY_ADD: "TRY_ADD",
+  ARMED: "ARMED",
+  PREPARE: "PREPARE",
+  WAIT_START: "WAIT_START",
+  ADDED: "ADDED",
+  WAIT_CAPTCHA: "WAIT_CAPTCHA",
+  STOPPED: "STOPPED",
+  ERROR: "ERROR",
+  DISCONNECTED: "DISCONNECTED",
+  PAGE_CLOSED: "PAGE_CLOSED",
+};
+
+const STATUS_MAP = {
+  [BOT_STATES.READY]: { title: "Готово", detail: "Браузер закрито" },
+  [BOT_STATES.AUTH]: { title: "Авторизація" },
+  [BOT_STATES.WAIT_BUY]: {
+    title: "Очікую кнопку “Купити”",
+    detail: "Технічний режим очікування",
+    technical: true,
+  },
+  [BOT_STATES.TRY_ADD]: { title: "Кнопка доступна", detail: "Клікаю" },
+  [BOT_STATES.ARMED]: { title: "Озброєно" },
+  [BOT_STATES.PREPARE]: { title: "Підготовка", detail: "Відкриваю сторінку" },
+  [BOT_STATES.WAIT_START]: { title: "Очікую старт" },
+  [BOT_STATES.ADDED]: {
+    title: "Товар додано в кошик",
+    detail: "Готово ✅",
+    final: true,
+  },
+  [BOT_STATES.WAIT_CAPTCHA]: {
+    title: "Потрібно ввести капчу",
+    detail: "Підтвердь капчу вручну",
+    technical: true,
+  },
+  [BOT_STATES.STOPPED]: {
+    title: "Зупинено",
+    detail: "Відстеження припинено",
+    final: true,
+  },
+  [BOT_STATES.ERROR]: { title: "Помилка", final: true },
+  [BOT_STATES.DISCONNECTED]: {
+    title: "Відʼєднано",
+    detail: "Chrome/сесія DevTools закрита. Перепідключусь при наступній дії.",
+  },
+  [BOT_STATES.PAGE_CLOSED]: { title: "Page closed", detail: "Вкладку закрито" },
+};
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function ensureDir(dir) {
@@ -38,10 +89,17 @@ class BotController {
     this.browser = null;
     this.page = null;
     this.tracking = false;
+    this.waitingCaptcha = false;
+    this.state = BOT_STATES.READY;
   }
 
-  _status(s, d = "") {
-    this.onStatus(s, d);
+  _status(state, detailOverride = "") {
+    if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
+
+    const message = STATUS_MAP[state] || { title: state, detail: "" };
+    const detail = detailOverride || message.detail || "";
+    this.state = state;
+    this.onStatus(message.title, detail);
   }
 
   async _focusCoinsTab() {
@@ -129,10 +187,7 @@ class BotController {
 
     // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
-      this._status(
-        "Відʼєднано",
-        "Chrome/сесія DevTools закрита. Перепідключусь при наступній дії.",
-      );
+      this._status(BOT_STATES.DISCONNECTED);
       this.browser = null;
       this.page = null;
     });
@@ -153,17 +208,14 @@ class BotController {
 
     // Якщо вже на coins.bank.gov.ua — НЕ перезавантажуємо
     if (currentUrl.includes("coins.bank.gov.ua")) {
-      this._status(
-        "Авторизація",
-        "Браузер відкрито. Якщо вже увійшла — нічого не роби.",
-      );
+      this._status(BOT_STATES.AUTH, "Браузер відкрито.");
       return;
     }
 
     // Інакше — відкриємо головну
     this._status(
-      "Авторизація",
-      "Відкриваю сайт. Увійди вручну, якщо потрібно.",
+      BOT_STATES.AUTH,
+      "Відкриваю сайт. Авторизуватись вручну, якщо потрібно.",
     );
     await this.page.goto("https://coins.bank.gov.ua/", {
       waitUntil: "domcontentloaded",
@@ -239,9 +291,7 @@ class BotController {
 
       // (опційно) базові налаштування
       await this.page.setViewport({ width: 1280, height: 720 }).catch(() => {});
-      this.page.on("close", () =>
-        this._status("Page closed", "Вкладку закрито"),
-      );
+      this.page.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
     }
 
     // bringToFront робимо “м’яко”
@@ -267,7 +317,7 @@ class BotController {
         throw new Error("Відстеження вже запущено. Натисни 'Зупинити'.");
 
       this.tracking = true;
-      this._status("Standby", "Очікую появу/активацію кнопки “Купити”");
+      this._status(BOT_STATES.WAIT_BUY);
 
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
       let addedToCart = false;
@@ -276,28 +326,33 @@ class BotController {
         // чекаємо появу кнопки
         const btn = await this._findBuyButton();
         if (btn) {
-          this._status("Кнопка доступна", "Клікаю");
+          this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
           await this._fastClick();
           const result = await this._waitAddedByCartCount(before, 6000);
 
           if (result === "added") {
-            this._status("Товар додано в кошик", "Готово ✅");
+            this._status(BOT_STATES.ADDED);
             addedToCart = true;
             this.tracking = false;
+            return;
           } else if (result === "captcha") {
-            this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
+            this._status(BOT_STATES.WAIT_CAPTCHA);
             this.tracking = false;
           } else {
-            this._status("Потрібна перевірка", "Перевір кошик вручну");
+            this._status(
+              BOT_STATES.ERROR,
+              "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+            );
+            this.tracking = false;
           }
         }
         await this._humanIdle(); // людська активність до появи кнопки
         await sleep(120);
       }
       if (!addedToCart) {
-        this._status("Зупинено", "");
+        this._status(BOT_STATES.STOPPED);
       }
       return;
     }
@@ -313,7 +368,10 @@ class BotController {
       throw new Error("Відстеження вже запущено. Натисни 'Зупинити'.");
     this.tracking = true;
 
-    this._status("Озброєно", `Старт: ${new Date(startAt).toLocaleString()}`);
+    this._status(
+      BOT_STATES.ARMED,
+      `Старт: ${new Date(startAt).toLocaleString()}`,
+    );
 
     // чекаємо prewarm
     while (this.tracking && Date.now() < openAt) {
@@ -322,43 +380,50 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status("Підготовка", "Відкриваю сторінку");
+    this._status(BOT_STATES.PREPARE);
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
 
     // чекаємо точний старт
-    this._status("Очікую старт", new Date(startAt).toLocaleString());
+    this._status(BOT_STATES.WAIT_START, new Date(startAt).toLocaleString());
     while (this.tracking && Date.now() < startAt) {
       await this._humanIdle();
       await sleep(80);
     }
     if (!this.tracking) return;
 
-    this._status("Старт!", "Клікаю");
+    this._status(BOT_STATES.TRY_ADD, "Старт! Клікаю");
     const before = await this._getCartCount();
     await this._fastClick();
 
     const result = await this._waitAddedByCartCount(before, 6000);
     if (result === "added") {
-      this._status("Товар додано в кошик", "Готово ✅");
+      this._status(BOT_STATES.ADDED);
       this.tracking = false;
+      return;
     } else if (result === "captcha") {
-      this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
+      this._status(BOT_STATES.WAIT_CAPTCHA);
       this.tracking = false;
     } else {
-      this._status("Потрібна перевірка", "Перевір кошик вручну");
+      this._status(
+        BOT_STATES.ERROR,
+        "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+      );
       this.tracking = false;
     }
   }
   async softStop() {
+    if (this.state === BOT_STATES.ADDED) return;
     this.tracking = false;
-    this._status("Зупинено", "Відстеження припинено");
+    this.waitingCaptcha = false;
+    this._status(BOT_STATES.STOPPED);
   }
   async stop() {
     this.tracking = false;
+    this.waitingCaptcha = false;
     if (this.browser) await this.browser.close();
     this.browser = null;
     this.page = null;
-    this._status("Готово", "Браузер закрито");
+    this._status(BOT_STATES.READY);
   }
 
   async _getCartCount() {
@@ -454,6 +519,93 @@ class BotController {
     return "unknown";
   }
 
+  async _isCaptchaStillVisible() {
+    if (!this.page) return false;
+
+    return this.page.evaluate(() => {
+      const bodyText = (document.body?.innerText || "").toLowerCase();
+      const challengeTextHints = [
+        "cloudflare",
+        "підтвердіть, що ви людина",
+        "verify you are human",
+        "checking your browser",
+        "перевірка безпеки",
+      ];
+
+      if (challengeTextHints.some((hint) => bodyText.includes(hint))) {
+        return true;
+      }
+
+      const selectors = [
+        "iframe[src*='challenges.cloudflare.com']",
+        "iframe[title*='challenge' i]",
+        "iframe[src*='captcha']",
+        "div.g-recaptcha",
+        "textarea[name='g-recaptcha-response']",
+        "[id*='challenge' i]",
+        "[class*='challenge' i]",
+      ];
+
+      return selectors.some((selector) => !!document.querySelector(selector));
+    });
+  }
+
+  async _waitCaptchaAndRetry(beforeCount) {
+    this.waitingCaptcha = true;
+    this._status(
+      "Очікує підтвердження Cloudflare",
+      "Пройди challenge вручну. Я продовжу автоматично.",
+    );
+
+    while (this.tracking && this.waitingCaptcha) {
+      const visible = await this._isCaptchaStillVisible();
+      if (!visible) break;
+      await sleep(500);
+    }
+
+    if (!this.tracking) {
+      this.waitingCaptcha = false;
+      return "stopped";
+    }
+
+    this.waitingCaptcha = false;
+
+    for (let attempt = 1; attempt <= 3 && this.tracking; attempt += 1) {
+      this._status(
+        "Повторна спроба після Cloudflare",
+        `Спроба ${attempt}/3: повторно натискаю “Купити”`,
+      );
+
+      await sleep(100 + Math.floor(Math.random() * 201));
+      try {
+        await this._fastClick();
+      } catch (e) {
+        this._status("Повторна спроба після Cloudflare", String(e));
+        continue;
+      }
+
+      const result = await this._waitAddedByCartCount(beforeCount, 3000);
+      if (result === "added") return "added";
+      if (result === "captcha") {
+        this.waitingCaptcha = true;
+        this._status(
+          "Очікує підтвердження Cloudflare",
+          "Challenge зʼявився знову. Пройди його вручну.",
+        );
+
+        while (this.tracking && this.waitingCaptcha) {
+          const visible = await this._isCaptchaStillVisible();
+          if (!visible) break;
+          await sleep(500);
+        }
+
+        this.waitingCaptcha = false;
+      }
+    }
+
+    return "unknown";
+  }
+
   async _hasCaptcha() {
     if (!this.page) return false;
 
@@ -476,6 +628,7 @@ class BotController {
   getState() {
     return {
       tracking: this.tracking,
+      waitingCaptcha: this.waitingCaptcha,
       hasBrowser: !!this.browser,
       hasPage: !!this.page && this.page.isClosed?.() !== true,
       pageUrl: this.page?.url?.() || null,

@@ -13,6 +13,22 @@ const statusDetail = $("statusDetail");
 
 let lastSoundEvent = "";
 
+const STATUS_COLOR = {
+  Готово: "idle",
+  Авторизація: "pending",
+  "Очікую кнопку “Купити”": "pending",
+  "Кнопка доступна": "pending",
+  Озброєно: "pending",
+  Підготовка: "pending",
+  "Очікую старт": "pending",
+  "Потрібно ввести капчу": "pending",
+  "Товар додано в кошик": "success",
+  Зупинено: "idle",
+  Помилка: "error",
+  Відʼєднано: "error",
+  "Page closed": "error",
+};
+
 function playAudioWithFallback(sources) {
   const [current, ...rest] = sources;
   if (!current) return;
@@ -78,11 +94,11 @@ function maybePlayStatusSound(status) {
 
 function setDot(status) {
   dot.className = "dot";
-  if (status.includes("Помилка")) dot.classList.add("dot-red");
-  else if (status.includes("Очікую") || status.includes("Підготовка"))
-    dot.classList.add("dot-yellow");
-  else if (status.includes("додано") || status.includes("Додано"))
-    dot.classList.add("dot-green");
+  const kind = STATUS_COLOR[status] || "idle";
+
+  if (kind === "error") dot.classList.add("dot-red");
+  else if (kind === "pending") dot.classList.add("dot-yellow");
+  else if (kind === "success") dot.classList.add("dot-green");
 }
 
 btnAuth.onclick = async () => {
