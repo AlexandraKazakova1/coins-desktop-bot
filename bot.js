@@ -41,6 +41,25 @@ class BotController {
     this.onStatus(s, d);
   }
 
+  async _focusCoinsTab() {
+    if (!this.browser) return false;
+
+    const pages = await this.browser.pages();
+    const existingCoinsTab = pages.find((p) =>
+      (p.url?.() || "").includes("coins.bank.gov.ua"),
+    );
+
+    if (!existingCoinsTab) return false;
+
+    this.page = existingCoinsTab;
+
+    try {
+      if (this.page.bringToFront) await this.page.bringToFront();
+    } catch {}
+
+    return true;
+  }
+
   async _findBuyButton() {
     for (const sel of BUY_SELECTORS) {
       const el = await this.page.$(sel);
@@ -103,6 +122,7 @@ class BotController {
 
   async openAuth() {
     await this._ensurePage();
+    await this._focusCoinsTab();
 
     const currentUrl = this.page.url() || "";
 
