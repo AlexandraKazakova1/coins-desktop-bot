@@ -84,9 +84,9 @@ btnArm.onclick = async () => {
   };
 
   const r = await window.api.arm(payload);
-  if (!r.ok) {
+  if (!r || r.ok !== true) {
     statusTitle.textContent = "Помилка";
-    statusDetail.textContent = r.error || "";
+    statusDetail.textContent = (r && r.error) || "Не вдалося запустити";
     setDot("Помилка");
   }
 };

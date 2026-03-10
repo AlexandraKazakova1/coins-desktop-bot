@@ -78,6 +78,7 @@ app.whenReady().then(() => {
     try {
       // запуск у фоні, не блокуємо UI
       bot.arm(payload).catch((e) => sendStatus("Помилка", e.message, "error"));
+      return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
       return { ok: false, error: e.message };

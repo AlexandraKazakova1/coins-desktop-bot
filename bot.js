@@ -23,6 +23,8 @@ const BOT_STATES = {
   WAIT_START: "WAIT_START",
   ADDED: "ADDED",
   WAIT_CAPTCHA: "WAIT_CAPTCHA",
+  WAIT_CLOUDFLARE: "WAIT_CLOUDFLARE",
+  RETRY_AFTER_CAPTCHA: "RETRY_AFTER_CAPTCHA",
   STOPPED: "STOPPED",
   ERROR: "ERROR",
   DISCONNECTED: "DISCONNECTED",
@@ -39,6 +41,8 @@ const STATE_EVENT_CODE = {
   [BOT_STATES.WAIT_START]: "wait_start",
   [BOT_STATES.ADDED]: "added_to_cart",
   [BOT_STATES.WAIT_CAPTCHA]: "captcha_required",
+  [BOT_STATES.WAIT_CLOUDFLARE]: "captcha_required",
+  [BOT_STATES.RETRY_AFTER_CAPTCHA]: "retry_after_cloudflare",
   [BOT_STATES.STOPPED]: "stopped",
   [BOT_STATES.ERROR]: "error",
   [BOT_STATES.DISCONNECTED]: "disconnected",
@@ -65,6 +69,15 @@ const STATUS_MAP = {
   [BOT_STATES.WAIT_CAPTCHA]: {
     title: "Потрібно ввести капчу",
     detail: "Підтвердь капчу вручну",
+    technical: true,
+  },
+  [BOT_STATES.WAIT_CLOUDFLARE]: {
+    title: "Очікує підтвердження Cloudflare",
+    detail: "Пройди challenge вручну. Я продовжу автоматично.",
+    technical: true,
+  },
+  [BOT_STATES.RETRY_AFTER_CAPTCHA]: {
+    title: "Повторна спроба після Cloudflare",
     technical: true,
   },
   [BOT_STATES.STOPPED]: {
@@ -386,8 +399,18 @@ class BotController {
             this.tracking = false;
             return;
           } else if (result === "captcha") {
-            this._status(BOT_STATES.WAIT_CAPTCHA);
+            const retryResult = await this._waitCaptchaAndRetry(before);
+            if (retryResult === "added") {
+              this._status(BOT_STATES.ADDED);
+              addedToCart = true;
+            } else if (retryResult === "unknown") {
+              this._status(
+                BOT_STATES.ERROR,
+                "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+              );
+            }
             this.tracking = false;
+            return;
           } else {
             this._status(
               BOT_STATES.ERROR,
@@ -445,11 +468,21 @@ class BotController {
     const result = await this._waitAddedByCartCount(before, 6000);
     if (result === "added") {
       this._status(BOT_STATES.ADDED);
+      addedToCart = true;
       this.tracking = false;
       return;
     } else if (result === "captcha") {
-      this._status(BOT_STATES.WAIT_CAPTCHA);
+      const retryResult = await this._waitCaptchaAndRetry(before);
+      if (retryResult === "added") {
+        this._status(BOT_STATES.ADDED);
+      } else if (retryResult === "unknown") {
+        this._status(
+          BOT_STATES.ERROR,
+          "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+        );
+      }
       this.tracking = false;
+      return;
     } else {
       this._status(
         BOT_STATES.ERROR,
@@ -478,26 +511,68 @@ class BotController {
 
     return await this.page.evaluate(() => {
       // Спробуємо знайти лічильник біля іконки кошика
-      const cartLink =
-        document.querySelector('a[aria-label="кошик"]') ||
-        document.querySelector('a.small-wrap-a[aria-label="кошик"]') ||
-        document.querySelector('a[href*="cart"], a[href*="kosik"]');
+      const uniqElements = (els) => {
+        const seen = new Set();
+        return els.filter((el) => {
+          if (!el || seen.has(el)) return false;
+          seen.add(el);
+          return true;
+        });
+      };
 
-      const texts = [];
+      const cartCandidates = uniqElements([
+        ...document.querySelectorAll("a[aria-label='кошик' i]"),
+        ...document.querySelectorAll("a[aria-label*='кошик' i]"),
+        ...document.querySelectorAll("a[aria-label*='cart' i]"),
+        ...document.querySelectorAll("a[href*='cart' i]"),
+        ...document.querySelectorAll("a[href*='kosik' i]"),
+        ...document.querySelectorAll("a[href*='basket' i]"),
+        ...document.querySelectorAll("a[href*='checkout' i]"),
+      ]);
 
-      if (cartLink) texts.push(cartLink.textContent || "");
-      // часті варіанти бейджа
-      const badge =
-        document.querySelector(".cart_count") ||
-        document.querySelector(".cart-count") ||
-        document.querySelector(".cart__count") ||
-        (cartLink ? cartLink.querySelector("span") : null);
+      const textCandidates = [];
+      const pushCandidate = (text, weight = 100) => {
+        const value = String(text || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!value) return;
+        textCandidates.push({ value, weight });
+      };
 
-      if (badge) texts.push(badge.textContent || "");
+      for (const link of cartCandidates) {
+        pushCandidate(link.textContent, 80);
+        pushCandidate(link.getAttribute("aria-label"), 85);
+        pushCandidate(link.getAttribute("title"), 90);
+        for (const child of link.querySelectorAll(
+          ".badge, [class*='count' i], span",
+        )) {
+          pushCandidate(child.textContent, 10);
+        }
+      }
 
-      const joined = texts.join(" ").replace(/\s+/g, " ").trim();
-      const m = joined.match(/(\d+)/);
-      return m ? Number(m[1]) : 0; // якщо не знайшли — вважаємо 0
+      const globalBadges = uniqElements([
+        ...document.querySelectorAll(".cart_count, .cart-count, .cart__count"),
+        ...document.querySelectorAll(".badge"),
+        ...document.querySelectorAll("[class*='cart' i] [class*='count' i]"),
+      ]);
+
+      for (const badge of globalBadges) {
+        const weight = badge.matches(".badge") ? 30 : 20;
+        pushCandidate(badge.textContent, weight);
+      }
+
+      const parsed = textCandidates
+        .flatMap((candidate) => {
+          const numbers = candidate.value.match(/\d+/g) || [];
+          return numbers
+            .map((raw) => Number(raw))
+            .filter((n) => Number.isFinite(n) && n > 0)
+            .map((n) => ({ n, weight: candidate.weight }));
+        })
+        .sort((a, b) => a.weight - b.weight || a.n - b.n);
+
+      if (parsed.length > 0) return parsed[0].n;
+      return 0; // якщо не знайшли — вважаємо 0
     });
   }
 
@@ -534,6 +609,7 @@ class BotController {
 
   async _waitAddedByCartCount(beforeCount, timeout = 5000) {
     const t0 = Date.now();
+    let prevButtonSignal = "";
 
     while (Date.now() - t0 < timeout) {
       // 1) Найнадійніше: лічильник кошика зріс
@@ -557,8 +633,60 @@ class BotController {
       const inCartState = await this._isInCartStateVisible();
       if (inCartState) return "added";
 
+      const buttonState = await this.page.evaluate((prevSignal) => {
+        const controls = [
+          ...document.querySelectorAll("button, a, [role='button']"),
+        ];
+        const addToCartHints = ["купити", "в кошик", "до кошика", "buy"];
+        const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+
+        const tracked = controls.find((el) => {
+          const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+          return addToCartHints.some((hint) => t.includes(hint));
+        });
+
+        if (!tracked) {
+          return { changedToInCart: false, signal: prevSignal || "" };
+        }
+
+        const text = (tracked.innerText || tracked.textContent || "")
+          .toLowerCase()
+          .trim();
+        const className = (tracked.className || "").toString().toLowerCase();
+        const signal = [
+          text,
+          tracked.hasAttribute("disabled") ||
+            tracked.getAttribute("aria-disabled") === "true",
+          className.includes("active") ||
+            tracked.getAttribute("aria-pressed") === "true",
+        ].join("|");
+
+        const looksInCart =
+          inCartHints.some((hint) => text.includes(hint)) ||
+          className.includes("active") ||
+          tracked.hasAttribute("disabled") ||
+          tracked.getAttribute("aria-disabled") === "true";
+
+        const changedToInCart =
+          looksInCart && !!prevSignal && prevSignal !== signal;
+        return { changedToInCart, signal };
+      }, prevButtonSignal);
+
+      prevButtonSignal = buttonState.signal || prevButtonSignal;
+      if (buttonState.changedToInCart) return "added";
+
       const captchaNeeded = await this._hasCaptcha();
       if (captchaNeeded) return "captcha";
+
+      console.debug(
+        "[waitAddedByCartCount]",
+        JSON.stringify({
+          beforeCount,
+          nowCount,
+          captchaDetected: captchaNeeded,
+          inCartState,
+        }),
+      );
 
       await sleep(120);
     }
@@ -600,9 +728,8 @@ class BotController {
   async _waitCaptchaAndRetry(beforeCount) {
     this.waitingCaptcha = true;
     this._status(
-      "Очікує підтвердження Cloudflare",
+      BOT_STATES.WAIT_CLOUDFLARE,
       "Пройди challenge вручну. Я продовжу автоматично.",
-      "captcha_required",
     );
 
     while (this.tracking && this.waitingCaptcha) {
@@ -620,20 +747,15 @@ class BotController {
 
     for (let attempt = 1; attempt <= 3 && this.tracking; attempt += 1) {
       this._status(
-        "Повторна спроба після Cloudflare",
+        BOT_STATES.RETRY_AFTER_CAPTCHA,
         `Спроба ${attempt}/3: повторно натискаю “Купити”`,
-        "retry_after_cloudflare",
       );
 
       await sleep(100 + Math.floor(Math.random() * 201));
       try {
         await this._fastClick();
       } catch (e) {
-        this._status(
-          "Повторна спроба після Cloudflare",
-          String(e),
-          "retry_after_cloudflare",
-        );
+        this._status("Повторна спроба…", String(e), "retry_after_cloudflare");
         continue;
       }
 
@@ -642,9 +764,8 @@ class BotController {
       if (result === "captcha") {
         this.waitingCaptcha = true;
         this._status(
-          "Очікує підтвердження Cloudflare",
+          BOT_STATES.WAIT_CLOUDFLARE,
           "Challenge зʼявився знову. Пройди його вручну.",
-          "captcha_required",
         );
 
         while (this.tracking && this.waitingCaptcha) {
