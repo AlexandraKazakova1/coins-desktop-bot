@@ -62,8 +62,12 @@ class BotController {
 
   async _findBuyButton() {
     for (const sel of BUY_SELECTORS) {
-      const el = await this.page.$(sel);
-      if (el) return el;
+      try {
+        const el = await this.page.$(sel);
+        if (el) return el;
+      } catch {
+        // пропускаємо некоректний/нестабільний селектор, не валимо пошук
+      }
     }
 
     // fallback по тексту
@@ -300,8 +304,10 @@ class BotController {
       this.tracking = false;
     } else if (result === "captcha") {
       this._status("Потрібно ввести капчу", "Підтвердь капчу вручну");
+      this.tracking = false;
     } else {
       this._status("Потрібна перевірка", "Перевір кошик вручну");
+      this.tracking = false;
     }
   }
   async softStop() {
