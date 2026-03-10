@@ -59,7 +59,18 @@ class BotController {
   }
 
   async _browser() {
-    if (this.browser) return;
+    // якщо браузер є, але відключений — скидаємо і запускаємо заново
+    if (this.browser) {
+      if (
+        typeof this.browser.isConnected === "function" &&
+        !this.browser.isConnected()
+      ) {
+        this.browser = null;
+        this.page = null;
+      } else {
+        return;
+      }
+    }
 
     const chrome = chromePaths().find(fs.existsSync);
     if (!chrome) throw new Error("Chrome не знайдено");
@@ -72,11 +83,18 @@ class BotController {
       args: ["--start-maximized"],
     });
 
+    // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
+    this.browser.on("disconnected", () => {
+      this._status(
+        "Відʼєднано",
+        "Chrome/сесія DevTools закрита. Перепідключусь при наступній дії.",
+      );
+      this.browser = null;
+      this.page = null;
+    });
+
     const pages = await this.browser.pages();
-    this.page = pages[0];
-    if (!this.page || this.page.isClosed()) {
-      this.page = await this.browser.newPage();
-    }
+    this.page = pages[0] || (await this.browser.newPage());
 
     await this.page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
@@ -84,10 +102,7 @@ class BotController {
   }
 
   async openAuth() {
-    await this._browser();
-
-    // Просто показуємо браузер і даємо тобі вручну зайти/перевірити сесію
-    await this.page.bringToFront();
+    await this._ensurePage();
 
     const currentUrl = this.page.url() || "";
 
@@ -152,14 +167,37 @@ class BotController {
   //   }
   //   return false;
   // }
+  async _ensurePage() {
+    await this._browser(); // має підняти this.browser / this.page або хоча б this.browser
 
+    // Якщо page не існує або закрита — створюємо нову
+    if (!this.page || this.page.isClosed?.() === true) {
+      if (!this.browser) throw new Error("Browser не ініціалізовано");
+      this.page = await this.browser.newPage();
+
+      // (опційно) базові налаштування
+      await this.page.setViewport({ width: 1280, height: 720 }).catch(() => {});
+      this.page.on("close", () =>
+        this._status("Page closed", "Вкладку закрито"),
+      );
+    }
+
+    // bringToFront робимо “м’яко”
+    try {
+      if (this.page.bringToFront) await this.page.bringToFront();
+    } catch (e) {
+      // якщо сесія закрита — не валимо весь процес, просто продовжуємо
+      if (!String(e).includes("Session closed")) throw e;
+    }
+
+    return this.page;
+  }
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
 
     const hasStartTime = !!startAtLocal;
 
-    await this._browser();
-    await this.page.bringToFront();
+    await this._ensurePage();
 
     // ====== РЕЖИМ БЕЗ ЧАСУ (STANDBY) ======
     if (!hasStartTime) {
