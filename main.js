@@ -8,9 +8,9 @@ let bot;
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 520,
-    height: 420,
-    resizable: false,
+    width: 600,
+    height: 520,
+    resizable: true,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -37,7 +37,20 @@ function createWindow() {
 
 function sendStatus(status, detail = "", eventCode = "") {
   if (!win) return;
-  win.webContents.send("status", { status, detail, eventCode, ts: Date.now() });
+  if (win.isDestroyed()) return;
+  if (!win.webContents) return;
+  if (win.webContents.isDestroyed()) return;
+
+  try {
+    win.webContents.send("status", {
+      status,
+      detail,
+      eventCode,
+      ts: Date.now(),
+    });
+  } catch (e) {
+    // ігноруємо, якщо вікно вже закрите
+  }
 }
 
 app.whenReady().then(() => {

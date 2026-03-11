@@ -216,6 +216,7 @@ class BotController {
       executablePath: chrome,
       userDataDir: this.profileDir,
       defaultViewport: null,
+      protocolTimeout: 24000000,
       args: ["--start-maximized"],
     });
 
@@ -242,7 +243,18 @@ class BotController {
 
     // Якщо вже на coins.bank.gov.ua — НЕ перезавантажуємо
     if (currentUrl.includes("coins.bank.gov.ua")) {
-      this._status(BOT_STATES.AUTH, "Браузер відкрито.");
+      const authorized = await this._isLikelyAuthorized();
+      if (authorized) {
+        this._status(
+          BOT_STATES.AUTH,
+          "Вже авторизовано ✅ Можна починати відстеження.",
+        );
+      } else {
+        this._status(
+          BOT_STATES.AUTH,
+          "Браузер відкрито. Увійди вручну, якщо ще не увійшла.",
+        );
+      }
       return;
     }
 
@@ -254,6 +266,41 @@ class BotController {
     await this.page.goto("https://coins.bank.gov.ua/", {
       waitUntil: "domcontentloaded",
     });
+    const authorized = await this._isLikelyAuthorized();
+    if (authorized) {
+      this._status(
+        BOT_STATES.AUTH,
+        "Вже авторизовано ✅ Можна починати відстеження.",
+      );
+    }
+  }
+
+  async _isLikelyAuthorized() {
+    if (!this.page) return false;
+
+    try {
+      const currentUrl = this.page.url?.() || "";
+      if (currentUrl.includes("/cabinet") || currentUrl.includes("/profile")) {
+        return true;
+      }
+
+      return await this.page.evaluate(() => {
+        const text = (document.body?.innerText || "").toLowerCase();
+        const signedInHints = ["вийти", "профіль", "кабінет", "мої замовлення"];
+        const signedOutHints = ["увійти", "вхід", "авторизація"];
+
+        const hasSignedInHint = signedInHints.some((hint) =>
+          text.includes(hint),
+        );
+        const hasSignedOutHint = signedOutHints.some((hint) =>
+          text.includes(hint),
+        );
+
+        return hasSignedInHint && !hasSignedOutHint;
+      });
+    } catch {
+      return false;
+    }
   }
 
   async _humanIdle() {
@@ -329,6 +376,12 @@ class BotController {
         await sleep(randomBetween(100, 300));
       }
     }
+    if (!lastError) {
+      throw new Error('Не вдалося клікнути кнопку "Купити"');
+    }
+
+    const friendly = humanizeAutomationError(lastError);
+    throw new Error(friendly);
   }
 
   // async _waitAdded(timeout = 3000) {
@@ -367,6 +420,7 @@ class BotController {
   }
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
+    let addedToCart = false;
 
     const hasStartTime = !!startAtLocal;
 
@@ -381,7 +435,6 @@ class BotController {
       this._status(BOT_STATES.WAIT_BUY);
 
       await this.page.goto(url, { waitUntil: "domcontentloaded" });
-      let addedToCart = false;
 
       while (this.tracking) {
         // чекаємо появу кнопки
@@ -811,4 +864,4 @@ class BotController {
   }
 }
 
-module.exports = { BotController };
+module.exports = { BotController, humanizeAutomationError };
