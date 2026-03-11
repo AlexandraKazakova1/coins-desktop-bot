@@ -864,4 +864,4 @@ class BotController {
   }
 }
 
-module.exports = { BotController, humanizeAutomationError };
+module.exports = { BotController };
