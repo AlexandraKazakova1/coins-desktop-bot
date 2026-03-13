@@ -514,9 +514,20 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status(BOT_STATES.TRY_ADD, "Старт! Клікаю");
+    this._status(BOT_STATES.WAIT_BUY, "Старт! Очікую появу кнопки “Купити”");
+
+    let buyButton = null;
+    while (this.tracking && !buyButton) {
+      buyButton = await this._findBuyButton();
+      if (!buyButton) {
+        await sleep(60);
+      }
+    }
+    if (!this.tracking) return;
+
+    this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
     const before = await this._getCartCount();
-    await this._fastClick();
+    await this._clickWithQuickRetries(buyButton, 3);
 
     const result = await this._waitAddedByCartCount(before, 6000);
     if (result === "added") {
