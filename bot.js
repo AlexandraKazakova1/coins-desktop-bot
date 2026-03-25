@@ -156,10 +156,41 @@ class BotController {
   }
 
   async _findBuyButton() {
+    const isReadyToClick = async (el) => {
+      if (!el) return false;
+      try {
+        return await el.evaluate((node) => {
+          const style = window.getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          const text = (node.innerText || node.textContent || "")
+            .toLowerCase()
+            .trim();
+          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0 &&
+            rect.width > 0 &&
+            rect.height > 0;
+
+          const enabled =
+            !node.hasAttribute("disabled") &&
+            node.getAttribute("aria-disabled") !== "true";
+
+          const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
+
+          return visible && enabled && !looksLikeInCart;
+        });
+      } catch {
+        return false;
+      }
+    };
+
     for (const sel of BUY_SELECTORS) {
       try {
         const el = await this.page.$(sel);
-        if (el) return el;
+        if (el && (await isReadyToClick(el))) return el;
       } catch {
         // пропускаємо некоректний/нестабільний селектор, не валимо пошук
       }
@@ -173,8 +204,27 @@ class BotController {
 
       const byText = candidates.find((el) => {
         const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0;
+        const enabled =
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-disabled") !== "true";
+        const looksLikeInCart =
+          t.includes("у кошику") ||
+          t.includes("в кошику") ||
+          t.includes("перейти до кошика");
+
         return (
-          t.includes("купити") || t.includes("в кошик") || t.includes("buy")
+          visible &&
+          enabled &&
+          !looksLikeInCart &&
+          (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
         );
       });
 
@@ -188,7 +238,33 @@ class BotController {
         );
       });
 
-      return span?.closest("button, a, [role='button']") || null;
+      const nearestControl = span?.closest("button, a, [role='button']");
+      if (!nearestControl) return null;
+
+      const style = window.getComputedStyle(nearestControl);
+      const rect = nearestControl.getBoundingClientRect();
+      const text = (
+        nearestControl.innerText ||
+        nearestControl.textContent ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+      const visible =
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || 1) > 0 &&
+        rect.width > 0 &&
+        rect.height > 0;
+      const enabled =
+        !nearestControl.hasAttribute("disabled") &&
+        nearestControl.getAttribute("aria-disabled") !== "true";
+      const looksLikeInCart =
+        text.includes("у кошику") ||
+        text.includes("в кошику") ||
+        text.includes("перейти до кошика");
+
+      return visible && enabled && !looksLikeInCart ? nearestControl : null;
     });
 
     return handle.asElement();

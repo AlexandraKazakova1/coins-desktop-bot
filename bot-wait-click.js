@@ -51,10 +51,40 @@ class WaitClickBot {
   }
 
   async _findBuyButton() {
+    const isReadyToClick = async (node) => {
+      if (!node) return false;
+      try {
+        return await node.evaluate((el) => {
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+          const looksLikeInCart =
+            text.includes("у кошику") ||
+            text.includes("в кошику") ||
+            text.includes("перейти до кошика");
+
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0 &&
+            rect.width > 0 &&
+            rect.height > 0;
+
+          const enabled =
+            !el.hasAttribute("disabled") &&
+            el.getAttribute("aria-disabled") !== "true";
+
+          return visible && enabled && !looksLikeInCart;
+        });
+      } catch {
+        return false;
+      }
+    };
+
     for (const selector of BUY_SELECTORS) {
       try {
         const node = await this.page.$(selector);
-        if (node) return node;
+        if (node && (await isReadyToClick(node))) return node;
       } catch {}
     }
 
@@ -62,7 +92,28 @@ class WaitClickBot {
       const controls = [...document.querySelectorAll("button, a, [role='button']")];
       const byText = controls.find((el) => {
         const text = (el.innerText || el.textContent || "").toLowerCase().trim();
-        return text.includes("купити") || text.includes("в кошик") || text.includes("buy");
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0;
+        const enabled =
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-disabled") !== "true";
+        const looksLikeInCart =
+          text.includes("у кошику") ||
+          text.includes("в кошику") ||
+          text.includes("перейти до кошика");
+
+        return (
+          visible &&
+          enabled &&
+          !looksLikeInCart &&
+          (text.includes("купити") || text.includes("в кошик") || text.includes("buy"))
+        );
       });
       return byText || null;
     });
