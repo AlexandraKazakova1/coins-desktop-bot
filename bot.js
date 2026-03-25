@@ -345,6 +345,18 @@ class BotController {
     );
   }
 
+  async _clickDetectedBuyButton(btn) {
+    if (!btn) throw new Error('Кнопку "Купити" не знайдено');
+
+    try {
+      await btn.evaluate((el) =>
+        el.scrollIntoView({ block: "center", inline: "center" }),
+      );
+    } catch {}
+
+    await this._clickWithQuickRetries(btn, 3);
+  }
+
   async _clickWithQuickRetries(btn, maxAttempts = 3) {
     let lastError = null;
 
@@ -443,7 +455,7 @@ class BotController {
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
-          await this._fastClick();
+          await this._clickDetectedBuyButton(btn);
           const result = await this._waitAddedByCartCount(before, 6000);
 
           if (result === "added") {
@@ -514,7 +526,10 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status(BOT_STATES.WAIT_BUY, "Старт! Очікую появу кнопки “Купити”");
+    this._status(
+      BOT_STATES.WAIT_BUY,
+      "Старт! Очікую появу кнопки “Купити”",
+    );
 
     let buyButton = null;
     while (this.tracking && !buyButton) {
@@ -527,7 +542,7 @@ class BotController {
 
     this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
     const before = await this._getCartCount();
-    await this._clickWithQuickRetries(buyButton, 3);
+    await this._clickDetectedBuyButton(buyButton);
 
     const result = await this._waitAddedByCartCount(before, 6000);
     if (result === "added") {
