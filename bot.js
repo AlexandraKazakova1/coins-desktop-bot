@@ -156,10 +156,65 @@ class BotController {
   }
 
   async _findBuyButton() {
+    const isReadyToClick = async (el) => {
+      if (!el) return false;
+      try {
+        return await el.evaluate((node) => {
+          const style = window.getComputedStyle(node);
+          const rect = node.getBoundingClientRect();
+          const text = (node.innerText || node.textContent || "")
+            .toLowerCase()
+            .trim();
+          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+          const negativeHints = [
+            "очіку",
+            "незабаром",
+            "розпродано",
+            "немає в наявності",
+            "sold out",
+            "unavailable",
+          ];
+
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0 &&
+            style.pointerEvents !== "none" &&
+            rect.width > 0 &&
+            rect.height > 0;
+
+          const enabled =
+            !node.hasAttribute("disabled") &&
+            node.getAttribute("aria-disabled") !== "true" &&
+            !String(node.className || "")
+              .toLowerCase()
+              .includes("disabled") &&
+            !String(node.className || "")
+              .toLowerCase()
+              .includes("inactive");
+
+          const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
+          const looksNegative = negativeHints.some((hint) => text.includes(hint));
+
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const topElement = document.elementFromPoint(cx, cy);
+          const notCovered =
+            !topElement || topElement === node || node.contains(topElement);
+
+          return visible && enabled && !looksLikeInCart && !looksNegative && notCovered;
+        });
+      } catch {
+        return false;
+      }
+    };
+
     for (const sel of BUY_SELECTORS) {
       try {
-        const el = await this.page.$(sel);
-        if (el) return el;
+        const candidates = await this.page.$$(sel);
+        for (const el of candidates) {
+          if (await isReadyToClick(el)) return el;
+        }
       } catch {
         // пропускаємо некоректний/нестабільний селектор, не валимо пошук
       }
@@ -173,8 +228,27 @@ class BotController {
 
       const byText = candidates.find((el) => {
         const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0;
+        const enabled =
+          !el.hasAttribute("disabled") &&
+          el.getAttribute("aria-disabled") !== "true";
+        const looksLikeInCart =
+          t.includes("у кошику") ||
+          t.includes("в кошику") ||
+          t.includes("перейти до кошика");
+
         return (
-          t.includes("купити") || t.includes("в кошик") || t.includes("buy")
+          visible &&
+          enabled &&
+          !looksLikeInCart &&
+          (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
         );
       });
 
@@ -188,7 +262,33 @@ class BotController {
         );
       });
 
-      return span?.closest("button, a, [role='button']") || null;
+      const nearestControl = span?.closest("button, a, [role='button']");
+      if (!nearestControl) return null;
+
+      const style = window.getComputedStyle(nearestControl);
+      const rect = nearestControl.getBoundingClientRect();
+      const text = (
+        nearestControl.innerText ||
+        nearestControl.textContent ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+      const visible =
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        Number(style.opacity || 1) > 0 &&
+        rect.width > 0 &&
+        rect.height > 0;
+      const enabled =
+        !nearestControl.hasAttribute("disabled") &&
+        nearestControl.getAttribute("aria-disabled") !== "true";
+      const looksLikeInCart =
+        text.includes("у кошику") ||
+        text.includes("в кошику") ||
+        text.includes("перейти до кошика");
+
+      return visible && enabled && !looksLikeInCart ? nearestControl : null;
     });
 
     return handle.asElement();
@@ -345,6 +445,18 @@ class BotController {
     );
   }
 
+  async _clickDetectedBuyButton(btn) {
+    if (!btn) throw new Error('Кнопку "Купити" не знайдено');
+
+    try {
+      await btn.evaluate((el) =>
+        el.scrollIntoView({ block: "center", inline: "center" }),
+      );
+    } catch {}
+
+    await this._clickWithQuickRetries(btn, 3);
+  }
+
   async _clickWithQuickRetries(btn, maxAttempts = 3) {
     let lastError = null;
 
@@ -443,7 +555,7 @@ class BotController {
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
-          await this._fastClick();
+          await this._clickDetectedBuyButton(btn);
           const result = await this._waitAddedByCartCount(before, 6000);
 
           if (result === "added") {
@@ -514,9 +626,23 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status(BOT_STATES.TRY_ADD, "Старт! Клікаю");
+    this._status(
+      BOT_STATES.WAIT_BUY,
+      "Старт! Очікую появу кнопки “Купити”",
+    );
+
+    let buyButton = null;
+    while (this.tracking && !buyButton) {
+      buyButton = await this._findBuyButton();
+      if (!buyButton) {
+        await sleep(60);
+      }
+    }
+    if (!this.tracking) return;
+
+    this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
     const before = await this._getCartCount();
-    await this._fastClick();
+    await this._clickDetectedBuyButton(buyButton);
 
     const result = await this._waitAddedByCartCount(before, 6000);
     if (result === "added") {
