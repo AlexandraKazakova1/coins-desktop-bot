@@ -166,21 +166,43 @@ class BotController {
             .toLowerCase()
             .trim();
           const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+          const negativeHints = [
+            "очіку",
+            "незабаром",
+            "розпродано",
+            "немає в наявності",
+            "sold out",
+            "unavailable",
+          ];
 
           const visible =
             style.display !== "none" &&
             style.visibility !== "hidden" &&
             Number(style.opacity || 1) > 0 &&
+            style.pointerEvents !== "none" &&
             rect.width > 0 &&
             rect.height > 0;
 
           const enabled =
             !node.hasAttribute("disabled") &&
-            node.getAttribute("aria-disabled") !== "true";
+            node.getAttribute("aria-disabled") !== "true" &&
+            !String(node.className || "")
+              .toLowerCase()
+              .includes("disabled") &&
+            !String(node.className || "")
+              .toLowerCase()
+              .includes("inactive");
 
           const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
+          const looksNegative = negativeHints.some((hint) => text.includes(hint));
 
-          return visible && enabled && !looksLikeInCart;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const topElement = document.elementFromPoint(cx, cy);
+          const notCovered =
+            !topElement || topElement === node || node.contains(topElement);
+
+          return visible && enabled && !looksLikeInCart && !looksNegative && notCovered;
         });
       } catch {
         return false;
@@ -189,8 +211,10 @@ class BotController {
 
     for (const sel of BUY_SELECTORS) {
       try {
-        const el = await this.page.$(sel);
-        if (el && (await isReadyToClick(el))) return el;
+        const candidates = await this.page.$$(sel);
+        for (const el of candidates) {
+          if (await isReadyToClick(el)) return el;
+        }
       } catch {
         // пропускаємо некоректний/нестабільний селектор, не валимо пошук
       }

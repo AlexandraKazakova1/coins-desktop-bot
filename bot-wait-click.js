@@ -62,19 +62,34 @@ class WaitClickBot {
             text.includes("у кошику") ||
             text.includes("в кошику") ||
             text.includes("перейти до кошика");
+          const looksNegative =
+            text.includes("очіку") ||
+            text.includes("незабаром") ||
+            text.includes("розпродано") ||
+            text.includes("немає в наявності") ||
+            text.includes("sold out") ||
+            text.includes("unavailable");
 
           const visible =
             style.display !== "none" &&
             style.visibility !== "hidden" &&
             Number(style.opacity || 1) > 0 &&
+            style.pointerEvents !== "none" &&
             rect.width > 0 &&
             rect.height > 0;
 
           const enabled =
             !el.hasAttribute("disabled") &&
-            el.getAttribute("aria-disabled") !== "true";
+            el.getAttribute("aria-disabled") !== "true" &&
+            !String(el.className || "").toLowerCase().includes("disabled") &&
+            !String(el.className || "").toLowerCase().includes("inactive");
 
-          return visible && enabled && !looksLikeInCart;
+          const cx = rect.left + rect.width / 2;
+          const cy = rect.top + rect.height / 2;
+          const topElement = document.elementFromPoint(cx, cy);
+          const notCovered = !topElement || topElement === el || el.contains(topElement);
+
+          return visible && enabled && !looksLikeInCart && !looksNegative && notCovered;
         });
       } catch {
         return false;
@@ -83,8 +98,10 @@ class WaitClickBot {
 
     for (const selector of BUY_SELECTORS) {
       try {
-        const node = await this.page.$(selector);
-        if (node && (await isReadyToClick(node))) return node;
+        const nodes = await this.page.$$(selector);
+        for (const node of nodes) {
+          if (await isReadyToClick(node)) return node;
+        }
       } catch {}
     }
 
