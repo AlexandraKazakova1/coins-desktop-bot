@@ -584,8 +584,8 @@ class BotController {
             this.tracking = false;
           }
         }
-        await this._humanIdle(); // людська активність до появи кнопки
-        await sleep(120);
+        // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
+        await sleep(35);
       }
       if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
         this._status(BOT_STATES.STOPPED);
