@@ -132,14 +132,19 @@ function firefoxPaths() {
 
 function resolveBrowserExecutable(browserType) {
   const normalized = String(browserType || "chrome").toLowerCase();
-  const candidates =
-    normalized === "opera"
-      ? operaPaths()
-      : normalized === "firefox"
-        ? firefoxPaths()
-        : chromePaths();
+  const firefoxCandidate = firefoxPaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
+  const chromeCandidate = chromePaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
+  const operaCandidate = operaPaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
 
-  return candidates.find((candidatePath) => fs.existsSync(candidatePath));
+  if (normalized === "opera") return operaCandidate || chromeCandidate;
+  if (normalized === "firefox") return firefoxCandidate || chromeCandidate;
+  return chromeCandidate;
 }
 
 class BotController {
@@ -353,12 +358,33 @@ class BotController {
       args: ["--start-maximized"],
     };
 
-    if (this.browserType === "firefox") {
+    const isNativeFirefox = String(executablePath).toLowerCase().includes("firefox.exe");
+    if (this.browserType === "firefox" && isNativeFirefox) {
       launchOptions.product = "firefox";
       launchOptions.args = [];
     }
 
-    this.browser = await puppeteer.launch(launchOptions);
+    try {
+      this.browser = await puppeteer.launch(launchOptions);
+    } catch (error) {
+      if (this.browserType !== "firefox") throw error;
+
+      const chromeFallback = chromePaths().find((candidatePath) =>
+        fs.existsSync(candidatePath),
+      );
+      if (!chromeFallback) throw error;
+
+      this.browser = await puppeteer.launch({
+        ...launchOptions,
+        executablePath: chromeFallback,
+        product: undefined,
+        args: ["--start-maximized"],
+      });
+      this._status(
+        BOT_STATES.AUTH,
+        "Mozilla не вдалося стабільно запустити через DevTools. Використовую резервний Chromium-процес для цього профілю.",
+      );
+    }
 
     // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
@@ -381,7 +407,11 @@ class BotController {
 
     const helperTab = await this.browser.newPage();
     this.page = helperTab;
-    await helperTab.goto(url, { waitUntil: "domcontentloaded" });
+    try {
+      await helperTab.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    } catch {
+      await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
+    }
 
     try {
       if (helperTab.bringToFront) await helperTab.bringToFront();
@@ -586,6 +616,48 @@ class BotController {
 
     return this.page;
   }
+
+  _isSameTargetUrl(targetUrl) {
+    try {
+      const current = new URL(this.page?.url?.() || "");
+      const target = new URL(targetUrl);
+      return (
+        current.origin === target.origin &&
+        current.pathname === target.pathname &&
+        current.search === target.search
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async _openTargetIfNeeded(url) {
+    if (!this.page) return;
+    if (this._isSameTargetUrl(url)) return;
+    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+  }
+
+  async _waitChallengeIfVisible() {
+    const challengeVisible = await this._isCaptchaStillVisible();
+    if (!challengeVisible) return false;
+
+    this.waitingCaptcha = true;
+    this._status(
+      BOT_STATES.WAIT_CLOUDFLARE,
+      "Заверши перевірку «Я людина» у вкладці. Потім продовжу автоматично.",
+    );
+
+    while (this.tracking && this.waitingCaptcha) {
+      const visible = await this._isCaptchaStillVisible();
+      if (!visible) break;
+      await sleep(400);
+    }
+
+    this.waitingCaptcha = false;
+    if (this.tracking) this._status(BOT_STATES.WAIT_BUY);
+    return true;
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -602,9 +674,15 @@ class BotController {
       this.tracking = true;
       this._status(BOT_STATES.WAIT_BUY);
 
-      await this.page.goto(url, { waitUntil: "domcontentloaded" });
+      await this._openTargetIfNeeded(url);
 
       while (this.tracking) {
+        const waitedChallenge = await this._waitChallengeIfVisible();
+        if (waitedChallenge) {
+          await sleep(60);
+          continue;
+        }
+
         // чекаємо появу кнопки
         const btn = await this._findBuyButton();
         if (btn) {
@@ -620,24 +698,18 @@ class BotController {
             this.tracking = false;
             return;
           } else if (result === "captcha") {
-            const retryResult = await this._waitCaptchaAndRetry(before);
-            if (retryResult === "added") {
-              this._status(BOT_STATES.ADDED);
-              addedToCart = true;
-            } else if (retryResult === "unknown") {
-              this._status(
-                BOT_STATES.ERROR,
-                "Не вдалося підтвердити додавання. Перевір кошик вручну.",
-              );
-            }
-            this.tracking = false;
-            return;
+            await this._waitCaptchaAndRetry(before);
+            this._status(
+              BOT_STATES.WAIT_BUY,
+              "Перевірка «Я не робот» очікує ручного завершення. Після цього продовжу чекати кнопку.",
+            );
+            await sleep(120);
+            continue;
           } else {
             this._status(
-              BOT_STATES.ERROR,
-              "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+              BOT_STATES.WAIT_BUY,
+              "Клік виконано, але додавання не підтверджено. Продовжую чекати кнопку без обмеження часу.",
             );
-            this.tracking = false;
           }
         }
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
@@ -673,7 +745,7 @@ class BotController {
     if (!this.tracking) return;
 
     this._status(BOT_STATES.PREPARE);
-    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+    await this._openTargetIfNeeded(url);
 
     // чекаємо точний старт
     this._status(BOT_STATES.WAIT_START, new Date(startAt).toLocaleString());
@@ -687,43 +759,49 @@ class BotController {
       "Старт! Очікую появу кнопки “Купити”",
     );
 
-    let buyButton = null;
-    while (this.tracking && !buyButton) {
-      buyButton = await this._findBuyButton();
+    while (this.tracking) {
+      const waitedChallenge = await this._waitChallengeIfVisible();
+      if (waitedChallenge) {
+        await sleep(80);
+        continue;
+      }
+
+      const buyButton = await this._findBuyButton();
       if (!buyButton) {
         await sleep(60);
+        continue;
       }
-    }
-    if (!this.tracking) return;
 
-    this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
-    const before = await this._getCartCount();
-    await this._clickDetectedBuyButton(buyButton);
+      this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
+      const before = await this._getCartCount();
+      await this._clickDetectedBuyButton(buyButton);
 
-    const result = await this._waitAddedByCartCount(before, 6000);
-    if (result === "added") {
-      this._status(BOT_STATES.ADDED);
-      addedToCart = true;
-      this.tracking = false;
-      return;
-    } else if (result === "captcha") {
-      const retryResult = await this._waitCaptchaAndRetry(before);
-      if (retryResult === "added") {
+      const result = await this._waitAddedByCartCount(before, 6000);
+      if (result === "added") {
         this._status(BOT_STATES.ADDED);
-      } else if (retryResult === "unknown") {
+        addedToCart = true;
+        this.tracking = false;
+        return;
+      } else if (result === "captcha") {
+        await this._waitCaptchaAndRetry(before);
+
         this._status(
-          BOT_STATES.ERROR,
-          "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+          BOT_STATES.WAIT_BUY,
+          "Після перевірки «Я людина» додавання не підтверджено. Продовжую чекати кнопку.",
         );
+        await sleep(120);
+        continue;
       }
-      this.tracking = false;
-      return;
-    } else {
+
       this._status(
-        BOT_STATES.ERROR,
-        "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+        BOT_STATES.WAIT_BUY,
+        "Клік виконано, але додавання не підтверджено. Продовжую чекати кнопку без обмеження часу.",
       );
-      this.tracking = false;
+      await sleep(120);
+    }
+
+    if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
+      this._status(BOT_STATES.STOPPED);
     }
   }
   async softStop() {
@@ -973,11 +1051,11 @@ class BotController {
     });
   }
 
-  async _waitCaptchaAndRetry(beforeCount) {
+  async _waitCaptchaAndRetry(_beforeCount) {
     this.waitingCaptcha = true;
     this._status(
       BOT_STATES.WAIT_CLOUDFLARE,
-      "Пройди challenge вручну. Я продовжу автоматично.",
+      "Потрібно пройти «Я не робот» вручну. Автоклік тимчасово вимкнений, після проходження продовжу відстеження.",
     );
 
     while (this.tracking && this.waitingCaptcha) {
@@ -992,41 +1070,11 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
-
-    for (let attempt = 1; attempt <= 3 && this.tracking; attempt += 1) {
-      this._status(
-        BOT_STATES.RETRY_AFTER_CAPTCHA,
-        `Спроба ${attempt}/3: повторно натискаю “Купити”`,
-      );
-
-      await sleep(100 + Math.floor(Math.random() * 201));
-      try {
-        await this._fastClick();
-      } catch (e) {
-        this._status("Повторна спроба…", String(e), "retry_after_cloudflare");
-        continue;
-      }
-
-      const result = await this._waitAddedByCartCount(beforeCount, 3000);
-      if (result === "added") return "added";
-      if (result === "captcha") {
-        this.waitingCaptcha = true;
-        this._status(
-          BOT_STATES.WAIT_CLOUDFLARE,
-          "Challenge зʼявився знову. Пройди його вручну.",
-        );
-
-        while (this.tracking && this.waitingCaptcha) {
-          const visible = await this._isCaptchaStillVisible();
-          if (!visible) break;
-          await sleep(500);
-        }
-
-        this.waitingCaptcha = false;
-      }
-    }
-
-    return "unknown";
+    this._status(
+      BOT_STATES.WAIT_BUY,
+      "Перевірку пройдено. Продовжую очікування кнопки «Купити».",
+    );
+    return "manual_done";
   }
 
   async _hasCaptcha() {
@@ -1035,8 +1083,13 @@ class BotController {
     return this.page.evaluate(() => {
       const bodyText = (document.body?.innerText || "").toLowerCase();
       if (bodyText.includes("капч")) return true;
+      if (bodyText.includes("cloudflare")) return true;
+      if (bodyText.includes("verify you are human")) return true;
+      if (bodyText.includes("підтвердіть, що ви людина")) return true;
 
       const selectors = [
+        "iframe[src*='challenges.cloudflare.com']",
+        "iframe[title*='challenge' i]",
         "iframe[src*='captcha']",
         "div.g-recaptcha",
         "textarea[name='g-recaptcha-response']",

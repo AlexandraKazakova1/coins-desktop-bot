@@ -1,12 +1,13 @@
 const $ = (id) => document.getElementById(id);
 
-const btnAuth = $("btnAuth");
-const btnAddTab = $("btnAddTab");
 const btnStartAll = $("btnStartAll");
 const btnStopAll = $("btnStopAll");
 const btnChrome = $("btnChrome");
 const btnOpera = $("btnOpera");
 const btnFirefox = $("btnFirefox");
+const chromeCount = $("chromeCount");
+const operaCount = $("operaCount");
+const firefoxCount = $("firefoxCount");
 const startAtInput = $("startAt");
 const tabsList = $("tabsList");
 
@@ -15,26 +16,14 @@ const statusTitle = $("statusTitle");
 const statusDetail = $("statusDetail");
 
 const tabsState = new Map();
-let selectedBrowserType = "chrome";
+const MAX_PER_BROWSER = 3;
+const lastAlertAtByTab = new Map();
 
 const BROWSER_LABEL = {
   chrome: "Chrome",
   opera: "Opera",
   firefox: "Mozilla",
 };
-
-function updateBrowserSelection() {
-  const mapping = [
-    [btnChrome, "chrome"],
-    [btnOpera, "opera"],
-    [btnFirefox, "firefox"],
-  ];
-
-  for (const [btn, type] of mapping) {
-    if (!btn) continue;
-    btn.classList.toggle("selectedBrowser", selectedBrowserType === type);
-  }
-}
 
 const STATUS_COLOR = {
   Готово: "idle",
@@ -48,9 +37,23 @@ const STATUS_COLOR = {
   "Товар додано в кошик": "success",
   Зупинено: "idle",
   Помилка: "error",
-  Відʼєднано: "error",
+  "Відʼєднано": "error",
   "Page closed": "error",
 };
+
+function countTabsByBrowser(type) {
+  return [...tabsState.values()].filter((tab) => tab.browserType === type).length;
+}
+
+function updateBrowserCounters() {
+  chromeCount.textContent = `${countTabsByBrowser("chrome")}/${MAX_PER_BROWSER} вкладок`;
+  operaCount.textContent = `${countTabsByBrowser("opera")}/${MAX_PER_BROWSER} вкладок`;
+  firefoxCount.textContent = `${countTabsByBrowser("firefox")}/${MAX_PER_BROWSER} вкладок`;
+
+  btnChrome.disabled = countTabsByBrowser("chrome") >= MAX_PER_BROWSER;
+  btnOpera.disabled = countTabsByBrowser("opera") >= MAX_PER_BROWSER;
+  btnFirefox.disabled = countTabsByBrowser("firefox") >= MAX_PER_BROWSER;
+}
 
 function setDot(status) {
   const normalizedStatus = String(status || "").replace(/^\[[^\]]+\]\s*/, "");
@@ -60,6 +63,25 @@ function setDot(status) {
   if (kind === "error") dot.classList.add("dot-red");
   else if (kind === "pending") dot.classList.add("dot-yellow");
   else if (kind === "success") dot.classList.add("dot-green");
+}
+
+function playAlertBeep() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const ctx = new AudioContextClass();
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = "sine";
+  oscillator.frequency.value = 880;
+  gainNode.gain.value = 0.03;
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  oscillator.start();
+  oscillator.stop(ctx.currentTime + 0.35);
+  oscillator.onended = () => ctx.close().catch(() => {});
 }
 
 async function invokeApi(call) {
@@ -73,19 +95,23 @@ function renderTab(tabId) {
   const tab = tabsState.get(tabId);
   if (!tab) return;
 
+  const tabNumberInBrowser = [...tabsState.values()]
+    .filter((item) => item.browserType === tab.browserType)
+    .sort((a, b) => a.id - b.id)
+    .findIndex((item) => item.id === tabId) + 1;
+
   const card = document.createElement("div");
   card.className = "tabCard";
   card.id = `tab-card-${tabId}`;
 
   card.innerHTML = `
     <div class="tabRow">
-      <strong>Вкладка ${tabId}</strong>
+      <strong>${BROWSER_LABEL[tab.browserType] || "Браузер"} • Вкладка ${tabNumberInBrowser}</strong>
       <button class="danger" data-action="stop">Зупинити</button>
     </div>
-    <div class="statusDetail">Браузер: ${BROWSER_LABEL[tab.browserType] || "Chrome"}</div>
     <input data-role="url" placeholder="https://coins.bank.gov.ua/..." value="${tab.url || ""}" />
     <div class="tabRow">
-      <button data-action="start">Почати пошук кнопки «Купити»</button>
+      <button data-action="start">Очікування кнопки купити</button>
       <span data-role="status" class="tabStatus">${tab.status || "Готово"}</span>
     </div>
     <div data-role="detail" class="statusDetail">${tab.detail || ""}</div>
@@ -132,75 +158,35 @@ function updateTabStatus(tabId, status, detail = "") {
   if (detailEl) detailEl.textContent = detail || "";
 }
 
-btnAuth?.addEventListener("click", async () => {
-  try {
-    btnAuth.disabled = true;
-    const r = await invokeApi(() => window.api.auth());
-    if (!r?.ok) {
-      statusTitle.textContent = "Помилка";
-      statusDetail.textContent = r?.error || "Не вдалося відкрити авторизацію";
-      setDot("Помилка");
-      return;
-    }
-
-    btnAddTab.disabled = false;
-    btnStartAll.disabled = false;
-    btnChrome.disabled = false;
-    btnOpera.disabled = false;
-    btnFirefox.disabled = false;
-    updateBrowserSelection();
-    statusTitle.textContent = "Авторизація";
-    statusDetail.textContent = "Готово. Тепер додай вкладки для цього акаунта.";
-    setDot("Авторизація");
-  } catch (error) {
-    statusTitle.textContent = "Помилка";
-    statusDetail.textContent = error?.message || "Помилка під час авторизації";
-    setDot("Помилка");
-  } finally {
-    btnAuth.disabled = false;
-  }
-});
-
-btnAddTab?.addEventListener("click", async () => {
-  const r = await invokeApi(() =>
-    window.api.addTab({
-      browserType: selectedBrowserType,
-    }),
-  );
+async function openBrowserTab(browserType) {
+  const r = await invokeApi(() => window.api.addTab({ browserType }));
   if (!r?.ok) {
     statusTitle.textContent = "Помилка";
-    statusDetail.textContent = r?.error || "Не вдалося додати вкладку";
+    statusDetail.textContent = r?.error || "Не вдалося відкрити вкладку браузера";
     setDot("Помилка");
     return;
   }
 
   tabsState.set(r.tabId, {
     id: r.tabId,
-    browserType: r.browserType || selectedBrowserType,
+    browserType: r.browserType || browserType,
     url: "",
     status: "Готово",
-    detail: "Скопіюй посилання з нової вкладки браузера та встав сюди.",
+    detail: "Скопіюй посилання з цієї вкладки браузера та встав сюди.",
   });
+
   renderTab(r.tabId);
-  statusTitle.textContent = "Вкладку додано";
-  statusDetail.textContent = "У браузері відкрито нову вкладку. Скопіюй URL та встав у поле вкладки.";
-  setDot("Готово");
-});
+  updateBrowserCounters();
 
-btnChrome?.addEventListener("click", () => {
-  selectedBrowserType = "chrome";
-  updateBrowserSelection();
-});
+  const browserTabs = countTabsByBrowser(r.browserType || browserType);
+  statusTitle.textContent = `${BROWSER_LABEL[r.browserType || browserType]}: вкладку відкрито`;
+  statusDetail.textContent = `Відкрито ${browserTabs}/${MAX_PER_BROWSER} вкладок. Авторизуйся, відкрий монету, скопіюй URL та встав у форму.`;
+  setDot("Авторизація");
+}
 
-btnOpera?.addEventListener("click", () => {
-  selectedBrowserType = "opera";
-  updateBrowserSelection();
-});
-
-btnFirefox?.addEventListener("click", () => {
-  selectedBrowserType = "firefox";
-  updateBrowserSelection();
-});
+btnChrome?.addEventListener("click", async () => openBrowserTab("chrome"));
+btnOpera?.addEventListener("click", async () => openBrowserTab("opera"));
+btnFirefox?.addEventListener("click", async () => openBrowserTab("firefox"));
 
 btnStartAll?.addEventListener("click", async () => {
   const tabIds = [...tabsState.keys()];
@@ -257,7 +243,20 @@ if (window.api?.onTabStatus) {
       renderTab(tabId);
     }
     updateTabStatus(tabId, status, detail);
+
+    const needsManualChallenge =
+      status === "Очікує підтвердження Cloudflare" ||
+      String(detail || "").toLowerCase().includes("я не робот");
+
+    if (needsManualChallenge) {
+      const now = Date.now();
+      const lastAt = lastAlertAtByTab.get(tabId) || 0;
+      if (now - lastAt > 15000) {
+        playAlertBeep();
+        lastAlertAtByTab.set(tabId, now);
+      }
+    }
   });
 }
 
-updateBrowserSelection();
+updateBrowserCounters();
