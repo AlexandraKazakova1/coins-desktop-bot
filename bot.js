@@ -1170,31 +1170,16 @@ class BotController {
         );
       };
 
-      const bodyText = (document.body?.innerText || "").toLowerCase();
-      const titleText = (document.title || "").toLowerCase();
-      const challengeTextHints = [
-        "cloudflare",
-        "підтвердіть, що ви людина",
-        "verify you are human",
-        "checking your browser",
-        "перевірка безпеки",
-      ];
-
-      if (
-        challengeTextHints.some(
-          (hint) => bodyText.includes(hint) || titleText.includes(hint),
-        )
-      ) {
-        return true;
-      }
-
       const selectors = [
         "iframe[src*='challenges.cloudflare.com']",
         "iframe[src*='turnstile' i]",
         "iframe[title*='challenge' i]",
+        "iframe[title*='captcha' i]",
         "iframe[src*='captcha']",
         "div.g-recaptcha",
         "textarea[name='g-recaptcha-response']",
+        "[data-sitekey]",
+        ".cf-turnstile",
         "[class*='cf-challenge' i]",
       ];
 
