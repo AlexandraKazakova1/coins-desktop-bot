@@ -212,14 +212,6 @@ async function closeAll() {
   browserSessions.clear();
 }
 
-async function closeAll() {
-  await stopAllTabs();
-  for (const sessionBot of browserSessions.values()) {
-    await sessionBot.stop();
-  }
-  browserSessions.clear();
-}
-
 async function handleAddTab(_event, payload) {
   try {
     const requestedType = String((payload && payload.browserType) || "").toLowerCase();
