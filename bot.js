@@ -132,14 +132,19 @@ function firefoxPaths() {
 
 function resolveBrowserExecutable(browserType) {
   const normalized = String(browserType || "chrome").toLowerCase();
-  const candidates =
-    normalized === "opera"
-      ? operaPaths()
-      : normalized === "firefox"
-        ? firefoxPaths()
-        : chromePaths();
+  const firefoxCandidate = firefoxPaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
+  const chromeCandidate = chromePaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
+  const operaCandidate = operaPaths().find((candidatePath) =>
+    fs.existsSync(candidatePath),
+  );
 
-  return candidates.find((candidatePath) => fs.existsSync(candidatePath));
+  if (normalized === "opera") return operaCandidate || chromeCandidate;
+  if (normalized === "firefox") return firefoxCandidate || chromeCandidate;
+  return chromeCandidate;
 }
 
 class BotController {
@@ -353,12 +358,33 @@ class BotController {
       args: ["--start-maximized"],
     };
 
-    if (this.browserType === "firefox") {
+    const isNativeFirefox = String(executablePath).toLowerCase().includes("firefox.exe");
+    if (this.browserType === "firefox" && isNativeFirefox) {
       launchOptions.product = "firefox";
       launchOptions.args = [];
     }
 
-    this.browser = await puppeteer.launch(launchOptions);
+    try {
+      this.browser = await puppeteer.launch(launchOptions);
+    } catch (error) {
+      if (this.browserType !== "firefox") throw error;
+
+      const chromeFallback = chromePaths().find((candidatePath) =>
+        fs.existsSync(candidatePath),
+      );
+      if (!chromeFallback) throw error;
+
+      this.browser = await puppeteer.launch({
+        ...launchOptions,
+        executablePath: chromeFallback,
+        product: undefined,
+        args: ["--start-maximized"],
+      });
+      this._status(
+        BOT_STATES.AUTH,
+        "Mozilla не вдалося стабільно запустити через DevTools. Використовую резервний Chromium-процес для цього профілю.",
+      );
+    }
 
     // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
@@ -381,7 +407,11 @@ class BotController {
 
     const helperTab = await this.browser.newPage();
     this.page = helperTab;
-    await helperTab.goto(url, { waitUntil: "domcontentloaded" });
+    try {
+      await helperTab.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+    } catch {
+      await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
+    }
 
     try {
       if (helperTab.bringToFront) await helperTab.bringToFront();
@@ -586,6 +616,48 @@ class BotController {
 
     return this.page;
   }
+
+  _isSameTargetUrl(targetUrl) {
+    try {
+      const current = new URL(this.page?.url?.() || "");
+      const target = new URL(targetUrl);
+      return (
+        current.origin === target.origin &&
+        current.pathname === target.pathname &&
+        current.search === target.search
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async _openTargetIfNeeded(url) {
+    if (!this.page) return;
+    if (this._isSameTargetUrl(url)) return;
+    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+  }
+
+  async _waitChallengeIfVisible() {
+    const challengeVisible = await this._isCaptchaStillVisible();
+    if (!challengeVisible) return false;
+
+    this.waitingCaptcha = true;
+    this._status(
+      BOT_STATES.WAIT_CLOUDFLARE,
+      "Заверши перевірку «Я людина» у вкладці. Потім продовжу автоматично.",
+    );
+
+    while (this.tracking && this.waitingCaptcha) {
+      const visible = await this._isCaptchaStillVisible();
+      if (!visible) break;
+      await sleep(400);
+    }
+
+    this.waitingCaptcha = false;
+    if (this.tracking) this._status(BOT_STATES.WAIT_BUY);
+    return true;
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -602,9 +674,15 @@ class BotController {
       this.tracking = true;
       this._status(BOT_STATES.WAIT_BUY);
 
-      await this.page.goto(url, { waitUntil: "domcontentloaded" });
+      await this._openTargetIfNeeded(url);
 
       while (this.tracking) {
+        const waitedChallenge = await this._waitChallengeIfVisible();
+        if (waitedChallenge) {
+          await sleep(60);
+          continue;
+        }
+
         // чекаємо появу кнопки
         const btn = await this._findBuyButton();
         if (btn) {
@@ -673,7 +751,7 @@ class BotController {
     if (!this.tracking) return;
 
     this._status(BOT_STATES.PREPARE);
-    await this.page.goto(url, { waitUntil: "domcontentloaded" });
+    await this._openTargetIfNeeded(url);
 
     // чекаємо точний старт
     this._status(BOT_STATES.WAIT_START, new Date(startAt).toLocaleString());
@@ -689,6 +767,12 @@ class BotController {
 
     let buyButton = null;
     while (this.tracking && !buyButton) {
+      const waitedChallenge = await this._waitChallengeIfVisible();
+      if (waitedChallenge) {
+        await sleep(80);
+        continue;
+      }
+
       buyButton = await this._findBuyButton();
       if (!buyButton) {
         await sleep(60);
@@ -1035,8 +1119,13 @@ class BotController {
     return this.page.evaluate(() => {
       const bodyText = (document.body?.innerText || "").toLowerCase();
       if (bodyText.includes("капч")) return true;
+      if (bodyText.includes("cloudflare")) return true;
+      if (bodyText.includes("verify you are human")) return true;
+      if (bodyText.includes("підтвердіть, що ви людина")) return true;
 
       const selectors = [
+        "iframe[src*='challenges.cloudflare.com']",
+        "iframe[title*='challenge' i]",
         "iframe[src*='captcha']",
         "div.g-recaptcha",
         "textarea[name='g-recaptcha-response']",
