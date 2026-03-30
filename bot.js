@@ -165,6 +165,7 @@ class BotController {
     this.browserType = String(browserType || "chrome").toLowerCase();
     this.tracking = false;
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
   }
 
@@ -589,6 +590,7 @@ class BotController {
     );
     await sleep(30);
 
+    await this._applyPostChallengeCooldown();
     await this._clickWithQuickRetries(btn, 1);
 
     const clickSentAt = Date.now();
@@ -644,7 +646,16 @@ class BotController {
       );
     } catch {}
 
+    await this._applyPostChallengeCooldown();
     await this._clickWithQuickRetries(btn, 1);
+  }
+
+  async _applyPostChallengeCooldown() {
+    const minHumanPauseMs = 500;
+    const elapsed = Date.now() - Number(this.lastChallengeResolvedAt || 0);
+    if (elapsed < minHumanPauseMs) {
+      await sleep(minHumanPauseMs - elapsed);
+    }
   }
 
   async _clickWithQuickRetries(btn, maxAttempts = 3) {
@@ -653,7 +664,7 @@ class BotController {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        await btn.click({ delay: 10 });
+        await btn.click({ delay: randomBetween(120, 260) });
         return;
       } catch (err) {
         lastError = err;
@@ -666,7 +677,7 @@ class BotController {
             box.x + box.width / 2,
             box.y + box.height / 2,
             {
-              delay: 10,
+              delay: randomBetween(120, 260),
             },
           );
           return;
@@ -759,6 +770,7 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = Date.now();
     if (this.tracking) this._status(BOT_STATES.WAIT_BUY);
     return true;
   }
@@ -1214,6 +1226,7 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = Date.now();
     this._status(
       BOT_STATES.WAIT_BUY,
       "Перевірку пройдено. Очікую кнопку «Купити» без повторних автокліків.",

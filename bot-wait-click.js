@@ -57,9 +57,7 @@ class WaitClickBot {
         return await node.evaluate((el) => {
           const style = window.getComputedStyle(el);
           const rect = el.getBoundingClientRect();
-          const text = (el.innerText || el.textContent || "")
-            .toLowerCase()
-            .trim();
+          const text = (el.innerText || el.textContent || "").toLowerCase().trim();
           const semanticText = [
             text,
             el.getAttribute("aria-label") || "",
@@ -117,8 +115,7 @@ class WaitClickBot {
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
           const topElement = document.elementFromPoint(cx, cy);
-          const notCovered =
-            !topElement || topElement === el || el.contains(topElement);
+          const notCovered = !topElement || topElement === el || el.contains(topElement);
 
           return (
             visible &&
@@ -149,9 +146,7 @@ class WaitClickBot {
         ...document.querySelectorAll("button, a, [role='button']"),
       ];
       const byText = controls.find((el) => {
-        const text = (el.innerText || el.textContent || "")
-          .toLowerCase()
-          .trim();
+        const text = (el.innerText || el.textContent || "").toLowerCase().trim();
         const semanticText = [
           text,
           el.getAttribute("aria-label") || "",
@@ -192,9 +187,7 @@ class WaitClickBot {
           enabled &&
           !looksLikeInCart &&
           !looksLikeCaptcha &&
-          (text.includes("купити") ||
-            text.includes("в кошик") ||
-            text.includes("buy"))
+          (text.includes("купити") || text.includes("в кошик") || text.includes("buy"))
         );
       });
       return byText || null;
