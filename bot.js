@@ -148,7 +148,14 @@ function resolveBrowserExecutable(browserType) {
 }
 
 class BotController {
-  constructor({ profileDir, onStatus, browser = null, page = null, ownsBrowser = true, browserType = "chrome" }) {
+  constructor({
+    profileDir,
+    onStatus,
+    browser = null,
+    page = null,
+    ownsBrowser = true,
+    browserType = "chrome",
+  }) {
     this.profileDir = profileDir;
     ensureDir(profileDir);
     this.onStatus = onStatus || (() => {});
@@ -364,7 +371,6 @@ class BotController {
 
       if (byText) return byText;
 
-      // Частий випадок — span всередині кнопки
       const span = [...document.querySelectorAll("span")].find((el) => {
         const t = (el.innerText || el.textContent || "").toLowerCase().trim();
         return (
@@ -405,7 +411,6 @@ class BotController {
   }
 
   async _browser() {
-    // якщо браузер є, але відключений — скидаємо і запускаємо заново
     if (this.browser) {
       if (
         typeof this.browser.isConnected === "function" &&
@@ -437,7 +442,9 @@ class BotController {
       ],
     };
 
-    const isNativeFirefox = String(executablePath).toLowerCase().includes("firefox.exe");
+    const isNativeFirefox = String(executablePath)
+      .toLowerCase()
+      .includes("firefox.exe");
     if (this.browserType === "firefox" && isNativeFirefox) {
       launchOptions.product = "firefox";
       launchOptions.ignoreDefaultArgs = undefined;
@@ -466,7 +473,6 @@ class BotController {
       );
     }
 
-    // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
       this._status(BOT_STATES.DISCONNECTED);
       this.browser = null;
@@ -481,14 +487,16 @@ class BotController {
     });
   }
 
-
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
     await this._ensurePage();
 
     const helperTab = await this.browser.newPage();
     this.page = helperTab;
     try {
-      await helperTab.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await helperTab.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
+      });
     } catch {
       await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
     }
@@ -497,7 +505,10 @@ class BotController {
       if (helperTab.bringToFront) await helperTab.bringToFront();
     } catch {}
 
-    this._status(BOT_STATES.AUTH, "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.");
+    this._status(
+      BOT_STATES.AUTH,
+      "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.",
+    );
     return helperTab;
   }
 
@@ -685,7 +696,7 @@ class BotController {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
-        await btn.click({ delay: 10 });
+        await btn.click({ delay: randomBetween(120, 260) });
         return;
       } catch (err) {
         lastError = err;
@@ -698,7 +709,7 @@ class BotController {
             box.x + box.width / 2,
             box.y + box.height / 2,
             {
-              delay: 10,
+              delay: randomBetween(120, 260),
             },
           );
           return;
@@ -898,10 +909,7 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status(
-      BOT_STATES.WAIT_BUY,
-      "Старт! Очікую появу кнопки “Купити”",
-    );
+    this._status(BOT_STATES.WAIT_BUY, "Старт! Очікую появу кнопки “Купити”");
 
     while (this.tracking) {
       const waitedChallenge = await this._waitChallengeIfVisible();
