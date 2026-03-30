@@ -19,19 +19,58 @@ h1 {
   border-radius: 12px;
   padding: 14px;
 }
+.hint {
+  margin: 10px 0 2px;
+  opacity: 0.85;
+  font-size: 13px;
+  line-height: 1.35;
+}
 .label {
   display: block;
   margin-top: 12px;
   margin-bottom: 6px;
   opacity: 0.9;
 }
-input {
+.tabsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+.tabsList {
+  display: grid;
+  gap: 10px;
+}
+.tabCard {
+  border: 1px solid #223043;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0f1620;
+}
+.tabRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.tabStatus {
+  font-size: 13px;
+  opacity: 0.95;
+}
+input,
+textarea {
   width: 90%;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #2b3b52;
   background: #0f1620;
   color: #e8eef7;
+}
+textarea {
+  resize: vertical;
+  min-height: 68px;
+  font-family: inherit;
 }
 button {
   padding: 10px 12px;
