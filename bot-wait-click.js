@@ -58,6 +58,24 @@ class WaitClickBot {
           const style = window.getComputedStyle(el);
           const rect = el.getBoundingClientRect();
           const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+          const semanticText = [
+            text,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+            el.getAttribute("href") || "",
+            el.className || "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          const actionText = [
+            text,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+          ]
+            .join(" ")
+            .toLowerCase();
           const looksLikeInCart =
             text.includes("у кошику") ||
             text.includes("в кошику") ||
@@ -69,6 +87,20 @@ class WaitClickBot {
             text.includes("немає в наявності") ||
             text.includes("sold out") ||
             text.includes("unavailable");
+          const looksLikeBuyAction =
+            actionText.includes("купити") ||
+            actionText.includes("в кошик") ||
+            actionText.includes("до кошика") ||
+            actionText.includes("buy");
+          const looksLikeCaptcha =
+            semanticText.includes("я не робот") ||
+            semanticText.includes("i am human") ||
+            semanticText.includes("verify") ||
+            semanticText.includes("cloudflare") ||
+            semanticText.includes("challenge") ||
+            semanticText.includes("captcha") ||
+            semanticText.includes("recaptcha") ||
+            semanticText.includes("turnstile");
 
           const visible =
             style.display !== "none" &&
@@ -89,7 +121,15 @@ class WaitClickBot {
           const topElement = document.elementFromPoint(cx, cy);
           const notCovered = !topElement || topElement === el || el.contains(topElement);
 
-          return visible && enabled && !looksLikeInCart && !looksNegative && notCovered;
+          return (
+            visible &&
+            enabled &&
+            looksLikeBuyAction &&
+            !looksLikeInCart &&
+            !looksNegative &&
+            !looksLikeCaptcha &&
+            notCovered
+          );
         });
       } catch {
         return false;
@@ -109,6 +149,24 @@ class WaitClickBot {
       const controls = [...document.querySelectorAll("button, a, [role='button']")];
       const byText = controls.find((el) => {
         const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const semanticText = [
+          text,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+          el.getAttribute("href") || "",
+          el.className || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        const actionText = [
+          text,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+        ]
+          .join(" ")
+          .toLowerCase();
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         const visible =
@@ -124,12 +182,24 @@ class WaitClickBot {
           text.includes("у кошику") ||
           text.includes("в кошику") ||
           text.includes("перейти до кошика");
+        const looksLikeCaptcha =
+          semanticText.includes("я не робот") ||
+          semanticText.includes("i am human") ||
+          semanticText.includes("verify") ||
+          semanticText.includes("cloudflare") ||
+          semanticText.includes("challenge") ||
+          semanticText.includes("captcha") ||
+          semanticText.includes("recaptcha") ||
+          semanticText.includes("turnstile");
 
         return (
           visible &&
           enabled &&
           !looksLikeInCart &&
-          (text.includes("купити") || text.includes("в кошик") || text.includes("buy"))
+          !looksLikeCaptcha &&
+          (actionText.includes("купити") ||
+            actionText.includes("в кошик") ||
+            actionText.includes("buy"))
         );
       });
       return byText || null;
