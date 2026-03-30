@@ -17,6 +17,7 @@ const statusDetail = $("statusDetail");
 
 const tabsState = new Map();
 const MAX_PER_BROWSER = 3;
+const lastAlertAtByTab = new Map();
 
 const BROWSER_LABEL = {
   chrome: "Chrome",
@@ -62,6 +63,25 @@ function setDot(status) {
   if (kind === "error") dot.classList.add("dot-red");
   else if (kind === "pending") dot.classList.add("dot-yellow");
   else if (kind === "success") dot.classList.add("dot-green");
+}
+
+function playAlertBeep() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+
+  const ctx = new AudioContextClass();
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.type = "sine";
+  oscillator.frequency.value = 880;
+  gainNode.gain.value = 0.03;
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+  oscillator.start();
+  oscillator.stop(ctx.currentTime + 0.35);
+  oscillator.onended = () => ctx.close().catch(() => {});
 }
 
 async function invokeApi(call) {
@@ -223,6 +243,19 @@ if (window.api?.onTabStatus) {
       renderTab(tabId);
     }
     updateTabStatus(tabId, status, detail);
+
+    const needsManualChallenge =
+      status === "Очікує підтвердження Cloudflare" ||
+      String(detail || "").toLowerCase().includes("я не робот");
+
+    if (needsManualChallenge) {
+      const now = Date.now();
+      const lastAt = lastAlertAtByTab.get(tabId) || 0;
+      if (now - lastAt > 15000) {
+        playAlertBeep();
+        lastAlertAtByTab.set(tabId, now);
+      }
+    }
   });
 }
 
