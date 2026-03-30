@@ -698,7 +698,13 @@ class BotController {
             this.tracking = false;
             return;
           } else if (result === "captcha") {
-            await this._waitCaptchaAndRetry(before);
+            const retryResult = await this._waitCaptchaAndRetry(before);
+            if (retryResult === "added") {
+              this._status(BOT_STATES.ADDED);
+              addedToCart = true;
+              this.tracking = false;
+              return;
+            }
             this._status(
               BOT_STATES.WAIT_BUY,
               "Перевірка «Я не робот» очікує ручного завершення. Після цього продовжу чекати кнопку.",
@@ -783,7 +789,12 @@ class BotController {
         this.tracking = false;
         return;
       } else if (result === "captcha") {
-        await this._waitCaptchaAndRetry(before);
+        const retryResult = await this._waitCaptchaAndRetry(before);
+        if (retryResult === "added") {
+          this._status(BOT_STATES.ADDED);
+          this.tracking = false;
+          return;
+        }
 
         this._status(
           BOT_STATES.WAIT_BUY,
@@ -1072,8 +1083,45 @@ class BotController {
     this.waitingCaptcha = false;
     this._status(
       BOT_STATES.WAIT_BUY,
-      "Перевірку пройдено. Продовжую очікування кнопки «Купити».",
+      "Перевірку пройдено. Пробую натиснути «Купити» автоматично.",
     );
+
+    let attempt = 1;
+    while (this.tracking && attempt <= 5) {
+      this._status(
+        BOT_STATES.RETRY_AFTER_CAPTCHA,
+        `Спроба ${attempt}/5 після перевірки «Я не робот».`,
+      );
+
+      try {
+        await this._fastClick();
+      } catch (error) {
+        attempt += 1;
+        await sleep(180);
+        continue;
+      }
+
+      const result = await this._waitAddedByCartCount(_beforeCount, 4000);
+      if (result === "added") return "added";
+      if (result === "captcha") {
+        this.waitingCaptcha = true;
+        this._status(
+          BOT_STATES.WAIT_CLOUDFLARE,
+          "Challenge зʼявився знову. Пройди вручну, потім продовжу автоклік.",
+        );
+
+        while (this.tracking && this.waitingCaptcha) {
+          const visible = await this._isCaptchaStillVisible();
+          if (!visible) break;
+          await sleep(500);
+        }
+        this.waitingCaptcha = false;
+      }
+
+      attempt += 1;
+      await sleep(150);
+    }
+
     return "manual_done";
   }
 
