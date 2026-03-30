@@ -651,7 +651,7 @@ class BotController {
   }
 
   async _applyPostChallengeCooldown() {
-    const minHumanPauseMs = 500;
+    const minHumanPauseMs = 0;
     const elapsed = Date.now() - Number(this.lastChallengeResolvedAt || 0);
     if (elapsed < minHumanPauseMs) {
       await sleep(minHumanPauseMs - elapsed);
