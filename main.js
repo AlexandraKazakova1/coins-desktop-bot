@@ -154,7 +154,10 @@ app.whenReady().then(() => {
       const tab = tabs.get(tabId);
       if (!tab?.bot) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
 
-      tab.bot
+      await prepareWorkersFromAuth();
+      const activeTab = tabs.get(tabId);
+
+      activeTab.bot
         .arm({
           url,
           startAtLocal: payload?.startAtLocal || null,
@@ -172,6 +175,8 @@ app.whenReady().then(() => {
       const tabIds = Array.isArray(payload?.tabIds)
         ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
         : [];
+
+      await prepareWorkersFromAuth();
 
       for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
         const tab = tabs.get(tabId);
