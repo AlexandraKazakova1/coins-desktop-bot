@@ -3,7 +3,7 @@ const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
 const { BotController } = require("./bot");
 
-const MAX_BROWSERS = 3;
+const MAX_PER_BROWSER = 2;
 const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 
 let win;
@@ -14,21 +14,19 @@ const tabs = new Map();
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
   if (!Number.isFinite(tabsCount)) return 1;
-  return Math.max(1, Math.min(MAX_BROWSERS, Math.floor(tabsCount)));
+  return Math.max(1, Math.min(MAX_PER_BROWSER * BROWSER_TYPES.length, Math.floor(tabsCount)));
 }
 
 function getAuthProfileDir() {
   return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
 }
 
-<<<<<<< HEAD
+function getWorkerProfileDir(tabId, browserType) {
+  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
 
 function getWorkerProfileDir(tabId) {
   return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
-=======
-function getWorkerProfileDir(tabId, browserType) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
->>>>>>> 288fb4330f5f5e58d4d26591a95bf06ed55ab54d
+
 }
 
 function recreateDirectory(dir) {
@@ -53,18 +51,11 @@ function cloneAuthProfile(workerProfileDir) {
     return true;
   };
 
-
-  try {
-    fs.cpSync(authProfile, workerProfileDir, {
-      recursive: true,
-      force: true,
-      filter: skipLockedFiles,
-    });
-  } catch (e) {
-    throw new Error(
-      "Не вдалося створити вкладку з поточної сесії. Натисни «Авторизація», увійди, закрий вікно авторизації і повтори."
-    );
-  }
+  fs.cpSync(authProfile, workerProfileDir, {
+    recursive: true,
+    force: true,
+    filter: skipLockedFiles,
+  });
 }
 
 
@@ -191,10 +182,23 @@ async function handleAuth() {
   }
 }
 
-async function handleAddTab() {
+async function handleAddTab(_event, payload) {
   try {
-    if (tabs.size >= MAX_BROWSERS) {
-      throw new Error(`Максимум ${MAX_BROWSERS} окремі браузери.`);
+    const requestedType = String(payload?.browserType || "").toLowerCase();
+    const browserType = BROWSER_TYPES.includes(requestedType) ? requestedType : "chrome";
+
+    const tabsForBrowser = [...tabs.values()].filter(
+      (tab) => tab.browserType === browserType,
+    ).length;
+
+    if (tabsForBrowser >= MAX_PER_BROWSER) {
+      throw new Error(`Для ${browserType} максимум ${MAX_PER_BROWSER} вкладки.`);
+    }
+
+    if (tabs.size >= MAX_PER_BROWSER * BROWSER_TYPES.length) {
+      throw new Error(
+        `Максимум ${MAX_PER_BROWSER * BROWSER_TYPES.length} вкладок (${MAX_PER_BROWSER} на кожен браузер).`,
+      );
     }
 
     const bot = ensureAuthBot();
@@ -202,8 +206,6 @@ async function handleAddTab() {
 
     const tabId = nextTabId;
     nextTabId += 1;
-
-    const browserType = BROWSER_TYPES[(tabId - 1) % BROWSER_TYPES.length];
 
     tabs.set(tabId, {
       id: tabId,
@@ -218,6 +220,48 @@ async function handleAddTab() {
       `Скопіюй посилання з нової вкладки. При старті відкриється окремий браузер: ${browserType}.`,
       "ready",
     );
+
+    return { ok: true, tabId, browserType };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartTab(_event, payload) {
+  try {
+    const tabId = Number(payload?.tabId);
+    const url = String(payload?.url || "").trim();
+    if (!url) throw new Error("Вкажи URL товару для вкладки.");
+
+    const tab = await ensureTabBot(tabId);
+
+    tab.bot
+      .arm({
+        url,
+        startAtLocal: payload?.startAtLocal || null,
+      })
+      .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartAllTabs(_event, payload) {
+  try {
+    const tabIds = Array.isArray(payload?.tabIds)
+      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+      : [];
+
+    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
+      const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+      if (!url) {
+        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
+        continue;
+      }
+
+      const tab = await ensureTabBot(tabId);
 
     return { ok: true, tabId };
   } catch (e) {

@@ -37,6 +37,16 @@ h1 {
   align-items: center;
   margin-top: 12px;
 }
+.browserSelector {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.selectedBrowser {
+  border-color: #4f7ecf;
+  background: #1f3559;
+}
 .tabsList {
   display: grid;
   gap: 10px;
