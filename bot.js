@@ -219,6 +219,14 @@ class BotController {
           ]
             .join(" ")
             .toLowerCase();
+          const actionText = [
+            text,
+            node.getAttribute("aria-label") || "",
+            node.getAttribute("title") || "",
+            node.getAttribute("data-action") || "",
+          ]
+            .join(" ")
+            .toLowerCase();
           const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
           const negativeHints = [
             "очіку",
@@ -261,7 +269,7 @@ class BotController {
           const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
           const looksNegative = negativeHints.some((hint) => text.includes(hint));
           const looksLikeBuyAction = buyHints.some((hint) =>
-            semanticText.includes(hint),
+            actionText.includes(hint),
           );
           const looksLikeCaptcha = challengeHints.some((hint) =>
             semanticText.includes(hint),
@@ -317,6 +325,14 @@ class BotController {
           ]
             .join(" ")
             .toLowerCase();
+          const actionText = [
+            t,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+          ]
+            .join(" ")
+            .toLowerCase();
           const style = window.getComputedStyle(el);
           const rect = el.getBoundingClientRect();
           const visible =
@@ -347,7 +363,9 @@ class BotController {
             enabled &&
             !looksLikeInCart &&
             !looksLikeCaptcha &&
-            (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
+            (actionText.includes("купити") ||
+              actionText.includes("в кошик") ||
+              actionText.includes("buy"))
           );
         });
 
@@ -620,6 +638,14 @@ class BotController {
         ]
           .join(" ")
           .toLowerCase();
+        const actionText = [
+          el.innerText || el.textContent || "",
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+        ]
+          .join(" ")
+          .toLowerCase();
 
         const buyHints = ["купити", "в кошик", "до кошика", "buy"];
         const challengeHints = [
@@ -634,7 +660,7 @@ class BotController {
         ];
 
         return (
-          buyHints.some((hint) => semanticText.includes(hint)) &&
+          buyHints.some((hint) => actionText.includes(hint)) &&
           !challengeHints.some((hint) => semanticText.includes(hint))
         );
       })

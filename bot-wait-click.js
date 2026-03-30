@@ -68,6 +68,14 @@ class WaitClickBot {
           ]
             .join(" ")
             .toLowerCase();
+          const actionText = [
+            text,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+          ]
+            .join(" ")
+            .toLowerCase();
           const looksLikeInCart =
             text.includes("у кошику") ||
             text.includes("в кошику") ||
@@ -80,10 +88,10 @@ class WaitClickBot {
             text.includes("sold out") ||
             text.includes("unavailable");
           const looksLikeBuyAction =
-            semanticText.includes("купити") ||
-            semanticText.includes("в кошик") ||
-            semanticText.includes("до кошика") ||
-            semanticText.includes("buy");
+            actionText.includes("купити") ||
+            actionText.includes("в кошик") ||
+            actionText.includes("до кошика") ||
+            actionText.includes("buy");
           const looksLikeCaptcha =
             semanticText.includes("я не робот") ||
             semanticText.includes("i am human") ||
@@ -157,6 +165,14 @@ class WaitClickBot {
         ]
           .join(" ")
           .toLowerCase();
+        const actionText = [
+          text,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+        ]
+          .join(" ")
+          .toLowerCase();
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
         const visible =
@@ -187,7 +203,9 @@ class WaitClickBot {
           enabled &&
           !looksLikeInCart &&
           !looksLikeCaptcha &&
-          (text.includes("купити") || text.includes("в кошик") || text.includes("buy"))
+          (actionText.includes("купити") ||
+            actionText.includes("в кошик") ||
+            actionText.includes("buy"))
         );
       });
       return byText || null;
