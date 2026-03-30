@@ -257,12 +257,8 @@ class BotController {
               .toLowerCase()
               .includes("inactive");
 
-          const looksLikeInCart = inCartHints.some((hint) =>
-            text.includes(hint),
-          );
-          const looksNegative = negativeHints.some((hint) =>
-            text.includes(hint),
-          );
+          const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
+          const looksNegative = negativeHints.some((hint) => text.includes(hint));
           const looksLikeBuyAction = buyHints.some((hint) =>
             semanticText.includes(hint),
           );
@@ -308,51 +304,51 @@ class BotController {
         ...document.querySelectorAll("button, a, [role='button']"),
       ];
 
-      const byText = candidates.find((el) => {
-        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
-        const semanticText = [
-          t,
-          el.getAttribute("aria-label") || "",
-          el.getAttribute("title") || "",
-          el.getAttribute("data-action") || "",
-          el.getAttribute("href") || "",
-          el.className || "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        const visible =
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
+        const byText = candidates.find((el) => {
+          const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+          const semanticText = [
+            t,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+            el.getAttribute("href") || "",
+            el.className || "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
           Number(style.opacity || 1) > 0 &&
           rect.width > 0 &&
           rect.height > 0;
         const enabled =
           !el.hasAttribute("disabled") &&
           el.getAttribute("aria-disabled") !== "true";
-        const looksLikeInCart =
-          t.includes("у кошику") ||
-          t.includes("в кошику") ||
-          t.includes("перейти до кошика");
-        const looksLikeCaptcha =
-          semanticText.includes("я не робот") ||
-          semanticText.includes("i am human") ||
-          semanticText.includes("verify") ||
-          semanticText.includes("cloudflare") ||
-          semanticText.includes("challenge") ||
-          semanticText.includes("captcha") ||
-          semanticText.includes("recaptcha") ||
-          semanticText.includes("turnstile");
+          const looksLikeInCart =
+            t.includes("у кошику") ||
+            t.includes("в кошику") ||
+            t.includes("перейти до кошика");
+          const looksLikeCaptcha =
+            semanticText.includes("я не робот") ||
+            semanticText.includes("i am human") ||
+            semanticText.includes("verify") ||
+            semanticText.includes("cloudflare") ||
+            semanticText.includes("challenge") ||
+            semanticText.includes("captcha") ||
+            semanticText.includes("recaptcha") ||
+            semanticText.includes("turnstile");
 
-        return (
-          visible &&
-          enabled &&
-          !looksLikeInCart &&
-          !looksLikeCaptcha &&
-          (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
-        );
-      });
+          return (
+            visible &&
+            enabled &&
+            !looksLikeInCart &&
+            !looksLikeCaptcha &&
+            (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
+          );
+        });
 
       if (byText) return byText;
 
@@ -1140,6 +1136,14 @@ class BotController {
   async _isCaptchaStillVisible() {
     if (!this.page) return false;
 
+    const currentUrl = this.page.url?.() || "";
+    if (
+      currentUrl.includes("/cdn-cgi/challenge-platform") ||
+      currentUrl.includes("challenges.cloudflare.com")
+    ) {
+      return true;
+    }
+
     return this.page.evaluate(() => {
       const isVisible = (el) => {
         if (!el) return false;
@@ -1155,6 +1159,7 @@ class BotController {
       };
 
       const bodyText = (document.body?.innerText || "").toLowerCase();
+      const titleText = (document.title || "").toLowerCase();
       const challengeTextHints = [
         "cloudflare",
         "підтвердіть, що ви людина",
@@ -1163,12 +1168,17 @@ class BotController {
         "перевірка безпеки",
       ];
 
-      if (challengeTextHints.some((hint) => bodyText.includes(hint))) {
+      if (
+        challengeTextHints.some(
+          (hint) => bodyText.includes(hint) || titleText.includes(hint),
+        )
+      ) {
         return true;
       }
 
       const selectors = [
         "iframe[src*='challenges.cloudflare.com']",
+        "iframe[src*='turnstile' i]",
         "iframe[title*='challenge' i]",
         "iframe[src*='captcha']",
         "div.g-recaptcha",
@@ -1213,41 +1223,7 @@ class BotController {
 
   async _hasCaptcha() {
     if (!this.page) return false;
-
-    return this.page.evaluate(() => {
-      const isVisible = (el) => {
-        if (!el) return false;
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        return (
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
-          Number(style.opacity || 1) > 0 &&
-          rect.width > 0 &&
-          rect.height > 0
-        );
-      };
-
-      const bodyText = (document.body?.innerText || "").toLowerCase();
-      if (bodyText.includes("капч")) return true;
-      if (bodyText.includes("cloudflare")) return true;
-      if (bodyText.includes("verify you are human")) return true;
-      if (bodyText.includes("підтвердіть, що ви людина")) return true;
-
-      const selectors = [
-        "iframe[src*='challenges.cloudflare.com']",
-        "iframe[title*='challenge' i]",
-        "iframe[src*='captcha']",
-        "div.g-recaptcha",
-        "textarea[name='g-recaptcha-response']",
-        "input[name*='captcha']",
-        "img[alt*='captcha' i]",
-      ];
-
-      return selectors.some((selector) =>
-        [...document.querySelectorAll(selector)].some((el) => isVisible(el)),
-      );
-    });
+    return this._isCaptchaStillVisible();
   }
 
   getState() {
