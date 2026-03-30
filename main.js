@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
@@ -54,6 +53,7 @@ function cloneAuthProfile(workerProfileDir) {
     filter: skipLockedFiles,
   });
 }
+
 
 function sendStatus(status, detail = "", eventCode = "") {
   if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
@@ -251,7 +251,28 @@ async function handleStartAllTabs(_event, payload) {
 
       const tab = await ensureTabBot(tabId);
 
-      tab.bot
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartAllTabs(_event, payload) {
+  try {
+    const tabIds = Array.isArray(payload?.tabIds)
+      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+      : [];
+
+    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
+      const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+      if (!url) {
+        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
+        continue;
+      }
+
+      const tab = await ensureTabBot(tabId);
+
+      activeTab.bot
         .arm({
           url,
           startAtLocal: (payload && payload.startAtLocal) || null,
