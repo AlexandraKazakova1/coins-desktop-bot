@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
@@ -24,6 +23,10 @@ function getAuthProfileDir() {
 
 function getWorkerProfileDir(tabId, browserType) {
   return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
+
+function getWorkerProfileDir(tabId) {
+  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
+
 }
 
 function recreateDirectory(dir) {
@@ -54,6 +57,16 @@ function cloneAuthProfile(workerProfileDir) {
     filter: skipLockedFiles,
   });
 }
+
+
+
+  fs.cpSync(authProfile, workerProfileDir, {
+    recursive: true,
+    force: true,
+    filter: skipLockedFiles,
+  });
+}
+
 
 function sendStatus(status, detail = "", eventCode = "") {
   if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
@@ -250,7 +263,49 @@ async function handleStartAllTabs(_event, payload) {
 
       const tab = await ensureTabBot(tabId);
 
-      tab.bot
+    return { ok: true, tabId };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartTab(_event, payload) {
+  try {
+    const tabId = Number(payload?.tabId);
+    const url = String(payload?.url || "").trim();
+    if (!url) throw new Error("Вкажи URL товару для вкладки.");
+
+    const tab = await ensureTabBot(tabId);
+
+    tab.bot
+      .arm({
+        url,
+        startAtLocal: payload?.startAtLocal || null,
+      })
+      .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartAllTabs(_event, payload) {
+  try {
+    const tabIds = Array.isArray(payload?.tabIds)
+      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+      : [];
+
+    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
+      const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+      if (!url) {
+        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
+        continue;
+      }
+
+      const tab = await ensureTabBot(tabId);
+
+      activeTab.bot
         .arm({
           url,
           startAtLocal: payload?.startAtLocal || null,
