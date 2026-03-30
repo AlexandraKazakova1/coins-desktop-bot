@@ -41,8 +41,7 @@ function cloneAuthProfile(workerProfileDir) {
     if (normalized.includes("singletonlock")) return false;
     if (normalized.endsWith(`${path.sep}lock`)) return false;
     if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
-      return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`)) return false;
     return true;
   };
 
@@ -133,17 +132,27 @@ async function stopAllTabs() {
   tabs.clear();
 }
 
-function createTabWorker(tabId) {
-  const profileDir = getWorkerProfileDir(tabId);
-  cloneAuthProfile(profileDir);
+async function prepareWorkersFromAuth() {
+  const hasPendingWorkers = [...tabs.values()].some((tab) => !tab.bot);
+  if (!hasPendingWorkers) return;
 
-  const bot = new BotController({
-    profileDir,
-    onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
-  });
+  if (authBot?.browser) {
+    await authBot.stop();
+  }
 
-  tabs.set(tabId, { id: tabId, bot, profileDir });
-  return tabs.get(tabId);
+  for (const [tabId, tab] of tabs.entries()) {
+    if (tab.bot) continue;
+
+    const profileDir = getWorkerProfileDir(tabId);
+    cloneAuthProfile(profileDir);
+
+    const bot = new BotController({
+      profileDir,
+      onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
+    });
+
+    tabs.set(tabId, { ...tab, bot, profileDir });
+  }
 }
 
 app.whenReady().then(() => {
@@ -167,14 +176,15 @@ app.whenReady().then(() => {
         throw new Error("Максимум 10 вкладок на один акаунт.");
       }
 
-      // Закриваємо auth-вікно перед копіюванням профілю, щоб не було lock-файлів.
-      if (authBot?.browser) {
-        await authBot.stop();
-      }
+      const bot = ensureAuthBot();
+      await bot.openHelperTab("https://coins.bank.gov.ua/");
 
       const tabId = nextTabId;
       nextTabId += 1;
-      createTabWorker(tabId);
+
+      tabs.set(tabId, { id: tabId, bot: null, profileDir: getWorkerProfileDir(tabId) });
+      sendTabStatus(tabId, "Готово", "Скопіюй посилання з нової вкладки та встав у поле.", "ready");
+
       return { ok: true, tabId };
     } catch (e) {
       return { ok: false, error: e.message };
@@ -190,7 +200,10 @@ app.whenReady().then(() => {
       const tab = tabs.get(tabId);
       if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
 
-      tab.bot
+      await prepareWorkersFromAuth();
+      const activeTab = tabs.get(tabId);
+
+      activeTab.bot
         .arm({
           url,
           startAtLocal: payload?.startAtLocal || null,
@@ -209,9 +222,11 @@ app.whenReady().then(() => {
         ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
         : [];
 
+      await prepareWorkersFromAuth();
+
       for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
         const tab = tabs.get(tabId);
-        if (!tab) continue;
+        if (!tab?.bot) continue;
 
         const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
         if (!url) {
@@ -237,7 +252,7 @@ app.whenReady().then(() => {
     try {
       const tabId = Number(payload?.tabId);
       const tab = tabs.get(tabId);
-      if (!tab) return { ok: true };
+      if (!tab?.bot) return { ok: true };
 
       await tab.bot.stop();
       sendTabStatus(tabId, "Готово", "Вкладку зупинено", "ready");
@@ -263,7 +278,7 @@ app.whenReady().then(() => {
       ok: true,
       state: {
         auth: authBot?.getState(),
-        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...t.bot.getState() })),
+        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...(t.bot ? t.bot.getState() : {}) })),
       },
     };
   });
