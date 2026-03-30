@@ -143,7 +143,7 @@ function resolveBrowserExecutable(browserType) {
   );
 
   if (normalized === "opera") return operaCandidate || chromeCandidate;
-  if (normalized === "firefox") return firefoxCandidate || chromeCandidate;
+  if (normalized === "firefox") return firefoxCandidate || null;
   return chromeCandidate;
 }
 
@@ -454,23 +454,12 @@ class BotController {
     try {
       this.browser = await puppeteer.launch(launchOptions);
     } catch (error) {
-      if (this.browserType !== "firefox") throw error;
-
-      const chromeFallback = chromePaths().find((candidatePath) =>
-        fs.existsSync(candidatePath),
-      );
-      if (!chromeFallback) throw error;
-
-      this.browser = await puppeteer.launch({
-        ...launchOptions,
-        executablePath: chromeFallback,
-        product: undefined,
-        args: ["--start-maximized"],
-      });
-      this._status(
-        BOT_STATES.AUTH,
-        "Mozilla не вдалося стабільно запустити через DevTools. Використовую резервний Chromium-процес для цього профілю.",
-      );
+      if (this.browserType === "firefox") {
+        throw new Error(
+          `Mozilla Firefox не вдалося запустити: ${error?.message || error}. Перевір встановлений Firefox та його сумісність з DevTools.`,
+        );
+      }
+      throw error;
     }
 
     this.browser.on("disconnected", () => {
