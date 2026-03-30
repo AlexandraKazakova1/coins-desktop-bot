@@ -148,7 +148,14 @@ function resolveBrowserExecutable(browserType) {
 }
 
 class BotController {
-  constructor({ profileDir, onStatus, browser = null, page = null, ownsBrowser = true, browserType = "chrome" }) {
+  constructor({
+    profileDir,
+    onStatus,
+    browser = null,
+    page = null,
+    ownsBrowser = true,
+    browserType = "chrome",
+  }) {
     this.profileDir = profileDir;
     ensureDir(profileDir);
     this.onStatus = onStatus || (() => {});
@@ -250,8 +257,12 @@ class BotController {
               .toLowerCase()
               .includes("inactive");
 
-          const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
-          const looksNegative = negativeHints.some((hint) => text.includes(hint));
+          const looksLikeInCart = inCartHints.some((hint) =>
+            text.includes(hint),
+          );
+          const looksNegative = negativeHints.some((hint) =>
+            text.includes(hint),
+          );
           const looksLikeBuyAction = buyHints.some((hint) =>
             semanticText.includes(hint),
           );
@@ -297,55 +308,54 @@ class BotController {
         ...document.querySelectorAll("button, a, [role='button']"),
       ];
 
-        const byText = candidates.find((el) => {
-          const t = (el.innerText || el.textContent || "").toLowerCase().trim();
-          const semanticText = [
-            t,
-            el.getAttribute("aria-label") || "",
-            el.getAttribute("title") || "",
-            el.getAttribute("data-action") || "",
-            el.getAttribute("href") || "",
-            el.className || "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          const style = window.getComputedStyle(el);
-          const rect = el.getBoundingClientRect();
-          const visible =
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
+      const byText = candidates.find((el) => {
+        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const semanticText = [
+          t,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+          el.getAttribute("href") || "",
+          el.className || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
           Number(style.opacity || 1) > 0 &&
           rect.width > 0 &&
           rect.height > 0;
         const enabled =
           !el.hasAttribute("disabled") &&
           el.getAttribute("aria-disabled") !== "true";
-          const looksLikeInCart =
-            t.includes("у кошику") ||
-            t.includes("в кошику") ||
-            t.includes("перейти до кошика");
-          const looksLikeCaptcha =
-            semanticText.includes("я не робот") ||
-            semanticText.includes("i am human") ||
-            semanticText.includes("verify") ||
-            semanticText.includes("cloudflare") ||
-            semanticText.includes("challenge") ||
-            semanticText.includes("captcha") ||
-            semanticText.includes("recaptcha") ||
-            semanticText.includes("turnstile");
+        const looksLikeInCart =
+          t.includes("у кошику") ||
+          t.includes("в кошику") ||
+          t.includes("перейти до кошика");
+        const looksLikeCaptcha =
+          semanticText.includes("я не робот") ||
+          semanticText.includes("i am human") ||
+          semanticText.includes("verify") ||
+          semanticText.includes("cloudflare") ||
+          semanticText.includes("challenge") ||
+          semanticText.includes("captcha") ||
+          semanticText.includes("recaptcha") ||
+          semanticText.includes("turnstile");
 
-          return (
-            visible &&
-            enabled &&
-            !looksLikeInCart &&
-            !looksLikeCaptcha &&
-            (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
-          );
-        });
+        return (
+          visible &&
+          enabled &&
+          !looksLikeInCart &&
+          !looksLikeCaptcha &&
+          (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
+        );
+      });
 
       if (byText) return byText;
 
-      // Частий випадок — span всередині кнопки
       const span = [...document.querySelectorAll("span")].find((el) => {
         const t = (el.innerText || el.textContent || "").toLowerCase().trim();
         return (
@@ -386,7 +396,6 @@ class BotController {
   }
 
   async _browser() {
-    // якщо браузер є, але відключений — скидаємо і запускаємо заново
     if (this.browser) {
       if (
         typeof this.browser.isConnected === "function" &&
@@ -413,7 +422,9 @@ class BotController {
       args: ["--start-maximized"],
     };
 
-    const isNativeFirefox = String(executablePath).toLowerCase().includes("firefox.exe");
+    const isNativeFirefox = String(executablePath)
+      .toLowerCase()
+      .includes("firefox.exe");
     if (this.browserType === "firefox" && isNativeFirefox) {
       launchOptions.product = "firefox";
       launchOptions.args = [];
@@ -441,7 +452,6 @@ class BotController {
       );
     }
 
-    // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
       this._status(BOT_STATES.DISCONNECTED);
       this.browser = null;
@@ -456,14 +466,16 @@ class BotController {
     });
   }
 
-
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
     await this._ensurePage();
 
     const helperTab = await this.browser.newPage();
     this.page = helperTab;
     try {
-      await helperTab.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+      await helperTab.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
+      });
     } catch {
       await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
     }
@@ -472,7 +484,10 @@ class BotController {
       if (helperTab.bringToFront) await helperTab.bringToFront();
     } catch {}
 
-    this._status(BOT_STATES.AUTH, "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.");
+    this._status(
+      BOT_STATES.AUTH,
+      "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.",
+    );
     return helperTab;
   }
 
@@ -854,10 +869,7 @@ class BotController {
     }
     if (!this.tracking) return;
 
-    this._status(
-      BOT_STATES.WAIT_BUY,
-      "Старт! Очікую появу кнопки “Купити”",
-    );
+    this._status(BOT_STATES.WAIT_BUY, "Старт! Очікую появу кнопки “Купити”");
 
     while (this.tracking) {
       const waitedChallenge = await this._waitChallengeIfVisible();
