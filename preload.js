@@ -1,10 +1,10 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
-  auth: () => ipcRenderer.invoke("auth"),
-  addTab: () => ipcRenderer.invoke("addTab"),
-  startTab: (payload) => ipcRenderer.invoke("startTab", payload),
-  startAllTabs: (payload) => ipcRenderer.invoke("startAllTabs", payload),
+  auth: () => ipcRenderer.invoke("auth_v2"),
+  addTab: (payload) => ipcRenderer.invoke("addTab_v2", payload),
+  startTab: (payload) => ipcRenderer.invoke("startTab_v2", payload),
+  startAllTabs: (payload) => ipcRenderer.invoke("startAllTabs_v2", payload),
   stopTab: (payload) => ipcRenderer.invoke("stopTab", payload),
   stop: () => ipcRenderer.invoke("stop"),
   onStatus: (cb) => {

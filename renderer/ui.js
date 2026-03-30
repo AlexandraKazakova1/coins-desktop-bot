@@ -4,6 +4,9 @@ const btnAuth = $("btnAuth");
 const btnAddTab = $("btnAddTab");
 const btnStartAll = $("btnStartAll");
 const btnStopAll = $("btnStopAll");
+const btnChrome = $("btnChrome");
+const btnOpera = $("btnOpera");
+const btnFirefox = $("btnFirefox");
 const startAtInput = $("startAt");
 const tabsList = $("tabsList");
 
@@ -12,6 +15,26 @@ const statusTitle = $("statusTitle");
 const statusDetail = $("statusDetail");
 
 const tabsState = new Map();
+let selectedBrowserType = "chrome";
+
+const BROWSER_LABEL = {
+  chrome: "Chrome",
+  opera: "Opera",
+  firefox: "Mozilla",
+};
+
+function updateBrowserSelection() {
+  const mapping = [
+    [btnChrome, "chrome"],
+    [btnOpera, "opera"],
+    [btnFirefox, "firefox"],
+  ];
+
+  for (const [btn, type] of mapping) {
+    if (!btn) continue;
+    btn.classList.toggle("selectedBrowser", selectedBrowserType === type);
+  }
+}
 
 const STATUS_COLOR = {
   Готово: "idle",
@@ -59,6 +82,7 @@ function renderTab(tabId) {
       <strong>Вкладка ${tabId}</strong>
       <button class="danger" data-action="stop">Зупинити</button>
     </div>
+    <div class="statusDetail">Браузер: ${BROWSER_LABEL[tab.browserType] || "Chrome"}</div>
     <input data-role="url" placeholder="https://coins.bank.gov.ua/..." value="${tab.url || ""}" />
     <div class="tabRow">
       <button data-action="start">Почати пошук кнопки «Купити»</button>
@@ -121,6 +145,10 @@ btnAuth?.addEventListener("click", async () => {
 
     btnAddTab.disabled = false;
     btnStartAll.disabled = false;
+    btnChrome.disabled = false;
+    btnOpera.disabled = false;
+    btnFirefox.disabled = false;
+    updateBrowserSelection();
     statusTitle.textContent = "Авторизація";
     statusDetail.textContent = "Готово. Тепер додай вкладки для цього акаунта.";
     setDot("Авторизація");
@@ -134,7 +162,11 @@ btnAuth?.addEventListener("click", async () => {
 });
 
 btnAddTab?.addEventListener("click", async () => {
-  const r = await invokeApi(() => window.api.addTab());
+  const r = await invokeApi(() =>
+    window.api.addTab({
+      browserType: selectedBrowserType,
+    }),
+  );
   if (!r?.ok) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = r?.error || "Не вдалося додати вкладку";
@@ -144,11 +176,30 @@ btnAddTab?.addEventListener("click", async () => {
 
   tabsState.set(r.tabId, {
     id: r.tabId,
+    browserType: r.browserType || selectedBrowserType,
     url: "",
     status: "Готово",
-    detail: "",
+    detail: "Скопіюй посилання з нової вкладки браузера та встав сюди.",
   });
   renderTab(r.tabId);
+  statusTitle.textContent = "Вкладку додано";
+  statusDetail.textContent = "У браузері відкрито нову вкладку. Скопіюй URL та встав у поле вкладки.";
+  setDot("Готово");
+});
+
+btnChrome?.addEventListener("click", () => {
+  selectedBrowserType = "chrome";
+  updateBrowserSelection();
+});
+
+btnOpera?.addEventListener("click", () => {
+  selectedBrowserType = "opera";
+  updateBrowserSelection();
+});
+
+btnFirefox?.addEventListener("click", () => {
+  selectedBrowserType = "firefox";
+  updateBrowserSelection();
 });
 
 btnStartAll?.addEventListener("click", async () => {
@@ -196,9 +247,17 @@ if (window.api?.onStatus) {
 if (window.api?.onTabStatus) {
   window.api.onTabStatus(({ tabId, status, detail }) => {
     if (!tabsState.has(tabId)) {
-      tabsState.set(tabId, { id: tabId, url: "", status: "Готово", detail: "" });
+      tabsState.set(tabId, {
+        id: tabId,
+        browserType: "chrome",
+        url: "",
+        status: "Готово",
+        detail: "",
+      });
       renderTab(tabId);
     }
     updateTabStatus(tabId, status, detail);
   });
 }
+
+updateBrowserSelection();
