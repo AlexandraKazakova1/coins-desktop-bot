@@ -1,39 +1,12 @@
+const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 
 const { BotController } = require("./bot");
 
 let win;
-let bots = [];
-
-function slugifyAccountName(raw, fallbackIndex = 0) {
-  const normalized = String(raw || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-zа-яіїєґ0-9]+/giu, "-")
-    .replace(/^-+|-+$/g, "");
-
-  return normalized || `account-${fallbackIndex + 1}`;
-}
-
-function parseAccounts(rawAccounts) {
-  const source = String(rawAccounts || "").trim();
-  if (!source) return ["default"];
-
-  const unique = [];
-  const seen = new Set();
-  const parts = source.split(/[\n,;]+/g).map((item) => item.trim());
-
-  for (const part of parts) {
-    if (!part) continue;
-    const key = part.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(part);
-  }
-
-  return unique.length > 0 ? unique : ["default"];
-}
+let workerBots = [];
+let authBot = null;
 
 function parseTabs(rawTabs) {
   const tabs = Number(rawTabs);
@@ -41,32 +14,56 @@ function parseTabs(rawTabs) {
   return Math.max(1, Math.min(10, Math.floor(tabs)));
 }
 
-function createBotsForConfig(rawAccounts, rawTabs) {
-  const accounts = parseAccounts(rawAccounts);
-  const tabsPerAccount = parseTabs(rawTabs);
-  const nextBots = [];
+function parseUrls(rawUrls) {
+  const rows = String(rawUrls || "")
+    .split(/\n+/g)
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-  for (let i = 0; i < accounts.length; i += 1) {
-    const accountName = accounts[i];
-    const accountSlug = slugifyAccountName(accountName, i);
+  return [...new Set(rows)];
+}
 
-    for (let tab = 1; tab <= tabsPerAccount; tab += 1) {
-      const label = `${accountName} · вкладка ${tab}`;
-      const bot = new BotController({
-        profileDir: path.join(
-          app.getPath("userData"),
-          "chrome-profiles",
-          accountSlug,
-          `tab-${tab}`,
-        ),
-        onStatus: (s, d, e) => sendStatus(`[${label}] ${s}`, d, e),
-      });
+function buildUrlsPlan(urls, tabsCount) {
+  if (!urls.length) return [];
 
-      nextBots.push(bot);
-    }
+  const plan = [];
+  for (let i = 0; i < tabsCount; i += 1) {
+    plan.push(urls[i % urls.length]);
+  }
+  return plan;
+}
+
+function getAuthProfileDir() {
+  return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
+}
+
+function getWorkerProfileDir(tabIndex) {
+  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabIndex + 1}`);
+}
+
+function recreateDirectory(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function cloneAuthProfileToWorkers(tabsCount) {
+  const authProfile = getAuthProfileDir();
+  if (!fs.existsSync(authProfile)) {
+    throw new Error("Спочатку натисни «Авторизація» і увійди в акаунт.");
   }
 
-  return nextBots;
+  for (let i = 0; i < tabsCount; i += 1) {
+    const workerProfile = getWorkerProfileDir(i);
+    recreateDirectory(workerProfile);
+    fs.cpSync(authProfile, workerProfile, { recursive: true, force: true });
+  }
+}
+
+async function stopWorkers() {
+  for (const bot of workerBots) {
+    await bot.stop();
+  }
+  workerBots = [];
 }
 
 function createWindow() {
@@ -118,23 +115,17 @@ function sendStatus(status, detail = "", eventCode = "") {
 
 app.whenReady().then(() => {
   createWindow();
-
-  bots = createBotsForConfig("", 1);
+  authBot = new BotController({
+    profileDir: getAuthProfileDir(),
+    onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
+  });
 
   // --- IPC API ---
 
   ipcMain.handle("auth", async (_, payload) => {
     try {
-      const nextBots = createBotsForConfig(payload?.accounts, payload?.tabs);
-
-      for (const runningBot of bots) {
-        await runningBot.stop();
-      }
-      bots = nextBots;
-
-      for (const bot of bots) {
-        await bot.openAuth();
-      }
+      await stopWorkers();
+      await authBot.openAuth();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -144,9 +135,8 @@ app.whenReady().then(() => {
 
   ipcMain.handle("stop", async () => {
     try {
-      for (const bot of bots) {
-        await bot.stop();
-      }
+      await stopWorkers();
+      await authBot?.softStop();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -155,18 +145,46 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("getStatus", async () => {
-    return { ok: true, state: bots.map((bot) => bot.getState()) };
+    return {
+      ok: true,
+      state: {
+        auth: authBot?.getState(),
+        workers: workerBots.map((bot) => bot.getState()),
+      },
+    };
   });
 
   ipcMain.handle("arm", async (_, payload) => {
     try {
-      // запуск у фоні, не блокуємо UI
-      if (!bots.length) {
-        bots = createBotsForConfig(payload?.accounts, payload?.tabs);
+      const urls = parseUrls(payload?.urls);
+      if (!urls.length) {
+        throw new Error("Додай хоча б одне посилання на товар.");
       }
 
-      for (const bot of bots) {
-        bot.arm(payload).catch((e) => sendStatus("Помилка", e.message, "error"));
+      const tabsCount = parseTabs(payload?.tabs);
+      const plan = buildUrlsPlan(urls, tabsCount);
+      await stopWorkers();
+      cloneAuthProfileToWorkers(tabsCount);
+
+      sendStatus(
+        "Підготовка",
+        `Запускаю ${tabsCount} вкладок для ${urls.length} посилань.`,
+        "prepare",
+      );
+
+      workerBots = plan.map((url, i) =>
+        new BotController({
+          profileDir: getWorkerProfileDir(i),
+          onStatus: (s, d, e) => sendStatus(`[Вкладка ${i + 1}] ${s}`, d, e),
+        }),
+      );
+
+      for (let i = 0; i < workerBots.length; i += 1) {
+        const bot = workerBots[i];
+        const url = plan[i];
+        bot
+          .arm({ url, startAtLocal: payload?.startAtLocal || null })
+          .catch((e) => sendStatus("Помилка", e.message, "error"));
       }
 
       return { ok: true };
@@ -179,9 +197,8 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", async () => {
   try {
-    for (const bot of bots) {
-      await bot.stop();
-    }
+    await stopWorkers();
+    await authBot?.stop();
   } catch {}
   if (process.platform !== "darwin") app.quit();
 });

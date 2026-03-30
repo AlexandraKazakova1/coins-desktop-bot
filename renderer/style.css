@@ -19,6 +19,12 @@ h1 {
   border-radius: 12px;
   padding: 14px;
 }
+.hint {
+  margin: 10px 0 2px;
+  opacity: 0.85;
+  font-size: 13px;
+  line-height: 1.35;
+}
 .label {
   display: block;
   margin-top: 12px;

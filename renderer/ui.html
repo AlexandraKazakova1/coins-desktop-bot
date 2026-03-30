@@ -13,18 +13,22 @@
       <div class="card">
         <button id="btnAuth">Авторизація</button>
 
-        <label class="label">Акаунти (через кому або з нового рядка)</label>
+        <p class="hint">
+          1) Натисни «Авторизація» та увійди в акаунт на сайті.<br />
+          2) Встав одне або кілька посилань (кожне з нового рядка).<br />
+          3) Вкажи кількість вкладок і натисни «Почати відстеження».
+        </p>
+
+        <label class="label">Посилання на товари (кожне з нового рядка)</label>
         <textarea
-          id="accounts"
-          rows="3"
-          placeholder="Напр.: account1, account2"
+          id="urls"
+          rows="4"
+          placeholder="https://coins.bank.gov.ua/product-1
+https://coins.bank.gov.ua/product-2"
         ></textarea>
 
-        <label class="label">Кількість вкладок на акаунт</label>
-        <input id="tabs" type="number" min="1" max="10" value="1" />
-
-        <label class="label">URL товару</label>
-        <input id="url" placeholder="Встав URL сторінки товару" />
+        <label class="label">Кількість паралельних вкладок (1–10)</label>
+        <input id="tabs" type="number" min="1" max="10" value="10" />
 
         <label class="label">Дата і час старту</label>
         <input id="startAt" type="datetime-local" />
