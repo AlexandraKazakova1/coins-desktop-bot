@@ -23,10 +23,6 @@ function getAuthProfileDir() {
 
 function getWorkerProfileDir(tabId, browserType) {
   return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
-
-function getWorkerProfileDir(tabId) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
-
 }
 
 function recreateDirectory(dir) {
@@ -50,15 +46,6 @@ function cloneAuthProfile(workerProfileDir) {
     if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`)) return false;
     return true;
   };
-
-  fs.cpSync(authProfile, workerProfileDir, {
-    recursive: true,
-    force: true,
-    filter: skipLockedFiles,
-  });
-}
-
-
 
   fs.cpSync(authProfile, workerProfileDir, {
     recursive: true,
@@ -146,7 +133,7 @@ async function ensureTabBot(tabId) {
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
   if (tab.bot) return tab;
 
-  if (authBot?.browser) {
+  if (authBot && authBot.browser) {
     await authBot.stop();
   }
 
@@ -184,7 +171,7 @@ async function handleAuth() {
 
 async function handleAddTab(_event, payload) {
   try {
-    const requestedType = String(payload?.browserType || "").toLowerCase();
+    const requestedType = String((payload && payload.browserType) || "").toLowerCase();
     const browserType = BROWSER_TYPES.includes(requestedType) ? requestedType : "chrome";
 
     const tabsForBrowser = [...tabs.values()].filter(
@@ -229,8 +216,8 @@ async function handleAddTab(_event, payload) {
 
 async function handleStartTab(_event, payload) {
   try {
-    const tabId = Number(payload?.tabId);
-    const url = String(payload?.url || "").trim();
+    const tabId = Number(payload && payload.tabId);
+    const url = String((payload && payload.url) || "").trim();
     if (!url) throw new Error("Вкажи URL товару для вкладки.");
 
     const tab = await ensureTabBot(tabId);
@@ -238,7 +225,7 @@ async function handleStartTab(_event, payload) {
     tab.bot
       .arm({
         url,
-        startAtLocal: payload?.startAtLocal || null,
+        startAtLocal: (payload && payload.startAtLocal) || null,
       })
       .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
 
@@ -250,39 +237,19 @@ async function handleStartTab(_event, payload) {
 
 async function handleStartAllTabs(_event, payload) {
   try {
-    const tabIds = Array.isArray(payload?.tabIds)
+    const tabIds = Array.isArray(payload && payload.tabIds)
       ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
       : [];
 
     for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
-      const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+      const urlsByTab = (payload && payload.urlsByTab) || {};
+      const url = String(urlsByTab[String(tabId)] || "").trim();
       if (!url) {
         sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
         continue;
       }
 
       const tab = await ensureTabBot(tabId);
-
-    return { ok: true, tabId };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-async function handleStartTab(_event, payload) {
-  try {
-    const tabId = Number(payload?.tabId);
-    const url = String(payload?.url || "").trim();
-    if (!url) throw new Error("Вкажи URL товару для вкладки.");
-
-    const tab = await ensureTabBot(tabId);
-
-    tab.bot
-      .arm({
-        url,
-        startAtLocal: payload?.startAtLocal || null,
-      })
-      .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
 
     return { ok: true };
   } catch (e) {
@@ -308,7 +275,7 @@ async function handleStartAllTabs(_event, payload) {
       activeTab.bot
         .arm({
           url,
-          startAtLocal: payload?.startAtLocal || null,
+          startAtLocal: (payload && payload.startAtLocal) || null,
         })
         .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
     }
@@ -334,9 +301,9 @@ app.whenReady().then(() => {
 
   registerIpc("stopTab", async (_event, payload) => {
     try {
-      const tabId = Number(payload?.tabId);
+      const tabId = Number(payload && payload.tabId);
       const tab = tabs.get(tabId);
-      if (!tab?.bot) return { ok: true };
+      if (!tab || !tab.bot) return { ok: true };
 
       await tab.bot.stop();
       sendTabStatus(tabId, "Готово", "Вкладку зупинено", "ready");
@@ -349,7 +316,7 @@ app.whenReady().then(() => {
   registerIpc("stop", async () => {
     try {
       await stopAllTabs();
-      await authBot?.softStop();
+      if (authBot) await authBot.softStop();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -361,7 +328,7 @@ app.whenReady().then(() => {
     return {
       ok: true,
       state: {
-        auth: authBot?.getState(),
+        auth: authBot ? authBot.getState() : null,
         tabs: [...tabs.values()].map((t) => ({ id: t.id, browserType: t.browserType, ...(t.bot ? t.bot.getState() : {}) })),
       },
     };
@@ -371,7 +338,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", async () => {
   try {
     await stopAllTabs();
-    await authBot?.stop();
+    if (authBot) await authBot.stop();
   } catch {}
   if (process.platform !== "darwin") app.quit();
 });
