@@ -35,7 +35,28 @@ function cloneAuthProfile(workerProfileDir) {
   }
 
   recreateDirectory(workerProfileDir);
-  fs.cpSync(authProfile, workerProfileDir, { recursive: true, force: true });
+
+  const skipLockedFiles = (src) => {
+    const normalized = String(src || "").toLowerCase();
+    if (normalized.includes("singletonlock")) return false;
+    if (normalized.endsWith(`${path.sep}lock`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
+      return false;
+    return true;
+  };
+
+  try {
+    fs.cpSync(authProfile, workerProfileDir, {
+      recursive: true,
+      force: true,
+      filter: skipLockedFiles,
+    });
+  } catch (e) {
+    throw new Error(
+      "Не вдалося створити вкладку з поточної сесії. Натисни «Авторизація», увійди, закрий вікно авторизації і повтори.",
+    );
+  }
 }
 
 function sendStatus(status, detail = "", eventCode = "") {
@@ -129,6 +150,10 @@ app.whenReady().then(() => {
   createWindow();
   ensureAuthBot();
 
+app.whenReady().then(() => {
+  createWindow();
+  ensureAuthBot();
+
   ipcMain.handle("auth", async (_, payload) => {
     try {
       const bot = ensureAuthBot();
@@ -142,6 +167,15 @@ app.whenReady().then(() => {
 
   ipcMain.handle("addTab", async () => {
     try {
+      if (tabs.size >= 10) {
+        throw new Error("Максимум 10 вкладок на один акаунт.");
+      }
+
+      // Закриваємо auth-вікно перед копіюванням профілю, щоб не було lock-файлів.
+      if (authBot?.browser) {
+        await authBot.stop();
+      }
+
       const tabId = nextTabId;
       nextTabId += 1;
       createTabWorker(tabId);
