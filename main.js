@@ -1,44 +1,26 @@
 const fs = require("fs");
 const path = require("path");
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
 const { BotController } = require("./bot");
 
 let win;
-let workerBots = [];
 let authBot = null;
+let nextTabId = 1;
+const tabs = new Map();
 
 function parseTabs(rawTabs) {
-  const tabs = Number(rawTabs);
-  if (!Number.isFinite(tabs)) return 1;
-  return Math.max(1, Math.min(10, Math.floor(tabs)));
-}
-
-function parseUrls(rawUrls) {
-  const rows = String(rawUrls || "")
-    .split(/\n+/g)
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return [...new Set(rows)];
-}
-
-function buildUrlsPlan(urls, tabsCount) {
-  if (!urls.length) return [];
-
-  const plan = [];
-  for (let i = 0; i < tabsCount; i += 1) {
-    plan.push(urls[i % urls.length]);
-  }
-  return plan;
+  const tabsCount = Number(rawTabs);
+  if (!Number.isFinite(tabsCount)) return 1;
+  return Math.max(1, Math.min(10, Math.floor(tabsCount)));
 }
 
 function getAuthProfileDir() {
   return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
 }
 
-function getWorkerProfileDir(tabIndex) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabIndex + 1}`);
+function getWorkerProfileDir(tabId) {
+  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
 }
 
 function recreateDirectory(dir) {
@@ -46,30 +28,47 @@ function recreateDirectory(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-function cloneAuthProfileToWorkers(tabsCount) {
+function cloneAuthProfile(workerProfileDir) {
   const authProfile = getAuthProfileDir();
   if (!fs.existsSync(authProfile)) {
     throw new Error("Спочатку натисни «Авторизація» і увійди в акаунт.");
   }
 
-  for (let i = 0; i < tabsCount; i += 1) {
-    const workerProfile = getWorkerProfileDir(i);
-    recreateDirectory(workerProfile);
-    fs.cpSync(authProfile, workerProfile, { recursive: true, force: true });
-  }
+  recreateDirectory(workerProfileDir);
+  fs.cpSync(authProfile, workerProfileDir, { recursive: true, force: true });
 }
 
-async function stopWorkers() {
-  for (const bot of workerBots) {
-    await bot.stop();
+function sendStatus(status, detail = "", eventCode = "") {
+  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
+    return;
   }
-  workerBots = [];
+
+  win.webContents.send("status", {
+    status,
+    detail,
+    eventCode,
+    ts: Date.now(),
+  });
+}
+
+function sendTabStatus(tabId, status, detail = "", eventCode = "") {
+  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
+    return;
+  }
+
+  win.webContents.send("tab-status", {
+    tabId,
+    status,
+    detail,
+    eventCode,
+    ts: Date.now(),
+  });
 }
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 600,
-    height: 520,
+    width: 760,
+    height: 700,
     resizable: true,
     autoHideMenuBar: true,
     webPreferences: {
@@ -81,7 +80,7 @@ function createWindow() {
 
   win.loadFile(path.join(__dirname, "renderer", "ui.html"));
 
-  win.webContents.on("context-menu", (event, params) => {
+  win.webContents.on("context-menu", (_event, params) => {
     const template = [
       { role: "cut", enabled: params.editFlags.canCut },
       { role: "copy", enabled: params.editFlags.canCopy },
@@ -95,43 +94,45 @@ function createWindow() {
   });
 }
 
-function sendStatus(status, detail = "", eventCode = "") {
-  if (!win) return;
-  if (win.isDestroyed()) return;
-  if (!win.webContents) return;
-  if (win.webContents.isDestroyed()) return;
-
-  try {
-    win.webContents.send("status", {
-      status,
-      detail,
-      eventCode,
-      ts: Date.now(),
+function ensureAuthBot() {
+  if (!authBot) {
+    authBot = new BotController({
+      profileDir: getAuthProfileDir(),
+      onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
     });
-  } catch (e) {
-    // ігноруємо, якщо вікно вже закрите
   }
+
+  return authBot;
+}
+
+async function stopAllTabs() {
+  for (const tab of tabs.values()) {
+    await tab.bot.stop();
+  }
+  tabs.clear();
+}
+
+function createTabWorker(tabId) {
+  const profileDir = getWorkerProfileDir(tabId);
+  cloneAuthProfile(profileDir);
+
+  const bot = new BotController({
+    profileDir,
+    onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
+  });
+
+  tabs.set(tabId, { id: tabId, bot, profileDir });
+  return tabs.get(tabId);
 }
 
 app.whenReady().then(() => {
   createWindow();
-  authBot = new BotController({
-    profileDir: getAuthProfileDir(),
-    onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
-  });
-
-  // --- IPC API ---
+  ensureAuthBot();
 
   ipcMain.handle("auth", async (_, payload) => {
     try {
-      if (!authBot) {
-        authBot = new BotController({
-          profileDir: getAuthProfileDir(),
-          onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
-        });
-      }
-      await stopWorkers();
-      await authBot.openAuth();
+      const bot = ensureAuthBot();
+      await bot.openAuth();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -139,9 +140,86 @@ app.whenReady().then(() => {
     }
   });
 
+  ipcMain.handle("addTab", async () => {
+    try {
+      const tabId = nextTabId;
+      nextTabId += 1;
+      createTabWorker(tabId);
+      return { ok: true, tabId };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle("startTab", async (_event, payload) => {
+    try {
+      const tabId = Number(payload?.tabId);
+      const url = String(payload?.url || "").trim();
+      if (!url) throw new Error("Вкажи URL товару для вкладки.");
+
+      const tab = tabs.get(tabId);
+      if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
+
+      tab.bot
+        .arm({
+          url,
+          startAtLocal: payload?.startAtLocal || null,
+        })
+        .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
+
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle("startAllTabs", async (_event, payload) => {
+    try {
+      const tabIds = Array.isArray(payload?.tabIds)
+        ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+        : [];
+
+      for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
+        const tab = tabs.get(tabId);
+        if (!tab) continue;
+
+        const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+        if (!url) {
+          sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
+          continue;
+        }
+
+        tab.bot
+          .arm({
+            url,
+            startAtLocal: payload?.startAtLocal || null,
+          })
+          .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
+      }
+
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle("stopTab", async (_event, payload) => {
+    try {
+      const tabId = Number(payload?.tabId);
+      const tab = tabs.get(tabId);
+      if (!tab) return { ok: true };
+
+      await tab.bot.stop();
+      sendTabStatus(tabId, "Готово", "Вкладку зупинено", "ready");
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
   ipcMain.handle("stop", async () => {
     try {
-      await stopWorkers();
+      await stopAllTabs();
       await authBot?.softStop();
       return { ok: true };
     } catch (e) {
@@ -155,55 +233,15 @@ app.whenReady().then(() => {
       ok: true,
       state: {
         auth: authBot?.getState(),
-        workers: workerBots.map((bot) => bot.getState()),
+        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...t.bot.getState() })),
       },
     };
-  });
-
-  ipcMain.handle("arm", async (_, payload) => {
-    try {
-      const urls = parseUrls(payload?.urls);
-      if (!urls.length) {
-        throw new Error("Додай хоча б одне посилання на товар.");
-      }
-
-      const tabsCount = parseTabs(payload?.tabs);
-      const plan = buildUrlsPlan(urls, tabsCount);
-      await stopWorkers();
-      cloneAuthProfileToWorkers(tabsCount);
-
-      sendStatus(
-        "Підготовка",
-        `Запускаю ${tabsCount} вкладок для ${urls.length} посилань.`,
-        "prepare",
-      );
-
-      workerBots = plan.map((url, i) =>
-        new BotController({
-          profileDir: getWorkerProfileDir(i),
-          onStatus: (s, d, e) => sendStatus(`[Вкладка ${i + 1}] ${s}`, d, e),
-        }),
-      );
-
-      for (let i = 0; i < workerBots.length; i += 1) {
-        const bot = workerBots[i];
-        const url = plan[i];
-        bot
-          .arm({ url, startAtLocal: payload?.startAtLocal || null })
-          .catch((e) => sendStatus("Помилка", e.message, "error"));
-      }
-
-      return { ok: true };
-    } catch (e) {
-      sendStatus("Помилка", e.message, "error");
-      return { ok: false, error: e.message };
-    }
   });
 });
 
 app.on("window-all-closed", async () => {
   try {
-    await stopWorkers();
+    await stopAllTabs();
     await authBot?.stop();
   } catch {}
   if (process.platform !== "darwin") app.quit();

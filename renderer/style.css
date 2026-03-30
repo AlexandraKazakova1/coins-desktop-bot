@@ -31,6 +31,33 @@ h1 {
   margin-bottom: 6px;
   opacity: 0.9;
 }
+.tabsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+}
+.tabsList {
+  display: grid;
+  gap: 10px;
+}
+.tabCard {
+  border: 1px solid #223043;
+  border-radius: 10px;
+  padding: 10px;
+  background: #0f1620;
+}
+.tabRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.tabStatus {
+  font-size: 13px;
+  opacity: 0.95;
+}
 input,
 textarea {
   width: 90%;

@@ -11,32 +11,22 @@
       <h1>CoinsBot</h1>
 
       <div class="card">
-        <button id="btnAuth">Авторизація</button>
+        <button id="btnAuth">1) Авторизація</button>
+        <button id="btnAddTab" class="secondary" disabled>
+          2) Додати вкладку на цей акаунт
+        </button>
+        <button id="btnStartAll" class="secondary" disabled>
+          3) Запустити пошук у всіх вкладках
+        </button>
 
-        <p class="hint">
-          1) Натисни «Авторизація» та увійди в акаунт на сайті.<br />
-          2) Встав одне або кілька посилань (кожне з нового рядка).<br />
-          3) Вкажи кількість вкладок і натисни «Почати відстеження».
-        </p>
-
-        <label class="label">Посилання на товари (кожне з нового рядка)</label>
-        <textarea
-          id="urls"
-          rows="4"
-          placeholder="https://coins.bank.gov.ua/product-1
-https://coins.bank.gov.ua/product-2"
-        ></textarea>
-
-        <label class="label">Кількість паралельних вкладок (1–10)</label>
-        <input id="tabs" type="number" min="1" max="10" value="10" />
-
-        <label class="label">Дата і час старту</label>
+        <label class="label">Дата і час старту (спільно для всіх, необовʼязково)</label>
         <input id="startAt" type="datetime-local" />
 
-        <div class="row">
-          <button id="btnArm">Почати відстеження</button>
-          <button id="btnStop" class="danger">Зупинити</button>
+        <div class="tabsHeader">
+          <div class="label">Вкладки цього акаунта</div>
+          <button id="btnStopAll" class="danger">Зупинити все</button>
         </div>
+        <div id="tabsList" class="tabsList"></div>
 
         <div class="status">
           <div class="dot" id="dot"></div>
