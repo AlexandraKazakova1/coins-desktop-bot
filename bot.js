@@ -698,18 +698,13 @@ class BotController {
             this.tracking = false;
             return;
           } else if (result === "captcha") {
-            const retryResult = await this._waitCaptchaAndRetry(before);
-            if (retryResult === "added") {
-              this._status(BOT_STATES.ADDED);
-              addedToCart = true;
-            } else if (retryResult === "unknown") {
-              this._status(
-                BOT_STATES.ERROR,
-                "Не вдалося підтвердити додавання. Перевір кошик вручну.",
-              );
-            }
-            this.tracking = false;
-            return;
+            await this._waitCaptchaAndRetry(before);
+            this._status(
+              BOT_STATES.WAIT_BUY,
+              "Перевірка «Я не робот» очікує ручного завершення. Після цього продовжу чекати кнопку.",
+            );
+            await sleep(120);
+            continue;
           } else {
             this._status(
               BOT_STATES.WAIT_BUY,
@@ -788,12 +783,7 @@ class BotController {
         this.tracking = false;
         return;
       } else if (result === "captcha") {
-        const retryResult = await this._waitCaptchaAndRetry(before);
-        if (retryResult === "added") {
-          this._status(BOT_STATES.ADDED);
-          this.tracking = false;
-          return;
-        }
+        await this._waitCaptchaAndRetry(before);
 
         this._status(
           BOT_STATES.WAIT_BUY,
@@ -1061,11 +1051,11 @@ class BotController {
     });
   }
 
-  async _waitCaptchaAndRetry(beforeCount) {
+  async _waitCaptchaAndRetry(_beforeCount) {
     this.waitingCaptcha = true;
     this._status(
       BOT_STATES.WAIT_CLOUDFLARE,
-      "Пройди challenge вручну. Я продовжу автоматично.",
+      "Потрібно пройти «Я не робот» вручну. Автоклік тимчасово вимкнений, після проходження продовжу відстеження.",
     );
 
     while (this.tracking && this.waitingCaptcha) {
@@ -1080,43 +1070,11 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
-
-    let attempt = 1;
-    while (this.tracking) {
-      this._status(
-        BOT_STATES.RETRY_AFTER_CAPTCHA,
-        `Спроба ${attempt}: повторно натискаю “Купити”`,
-      );
-
-      await sleep(100 + Math.floor(Math.random() * 201));
-      try {
-        await this._fastClick();
-      } catch (e) {
-        this._status("Повторна спроба…", String(e), "retry_after_cloudflare");
-        continue;
-      }
-
-      const result = await this._waitAddedByCartCount(beforeCount, 3000);
-      if (result === "added") return "added";
-      if (result === "captcha") {
-        this.waitingCaptcha = true;
-        this._status(
-          BOT_STATES.WAIT_CLOUDFLARE,
-          "Challenge зʼявився знову. Пройди його вручну.",
-        );
-
-        while (this.tracking && this.waitingCaptcha) {
-          const visible = await this._isCaptchaStillVisible();
-          if (!visible) break;
-          await sleep(500);
-        }
-
-        this.waitingCaptcha = false;
-      }
-      attempt += 1;
-    }
-
-    return "unknown";
+    this._status(
+      BOT_STATES.WAIT_BUY,
+      "Перевірку пройдено. Продовжую очікування кнопки «Купити».",
+    );
+    return "manual_done";
   }
 
   async _hasCaptcha() {
