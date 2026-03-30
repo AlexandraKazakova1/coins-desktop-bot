@@ -1,28 +1,40 @@
+const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
 const { BotController } = require("./bot");
 
-const MAX_PER_BROWSER = 2;
+const MAX_PER_BROWSER = 3;
 const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 
 let win;
-let authBot = null;
 let nextTabId = 1;
 const tabs = new Map();
+const browserSessions = new Map();
 
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
   if (!Number.isFinite(tabsCount)) return 1;
-  return Math.max(1, Math.min(MAX_PER_BROWSER * BROWSER_TYPES.length, Math.floor(tabsCount)));
+  return Math.max(
+    1,
+    Math.min(MAX_PER_BROWSER * BROWSER_TYPES.length, Math.floor(tabsCount)),
+  );
 }
 
-function getAuthProfileDir() {
-  return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
+function getAuthProfileDir(browserType) {
+  return path.join(
+    app.getPath("userData"),
+    "chrome-profiles",
+    `authorized-${browserType}`,
+  );
 }
 
 function getWorkerProfileDir(tabId, browserType) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
+  return path.join(
+    app.getPath("userData"),
+    "chrome-profiles",
+    `${browserType}-browser-${tabId}`,
+  );
 }
 
 function recreateDirectory(dir) {
@@ -30,10 +42,12 @@ function recreateDirectory(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-function cloneAuthProfile(workerProfileDir) {
-  const authProfile = getAuthProfileDir();
+function cloneAuthProfile(workerProfileDir, browserType) {
+  const authProfile = getAuthProfileDir(browserType);
   if (!fs.existsSync(authProfile)) {
-    throw new Error("Спочатку натисни «Авторизація» і увійди в акаунт.");
+    throw new Error(
+      `Для ${browserType} ще немає авторизації. Натисни кнопку цього браузера та увійди в акаунт.`,
+    );
   }
 
   recreateDirectory(workerProfileDir);
@@ -43,7 +57,11 @@ function cloneAuthProfile(workerProfileDir) {
     if (normalized.includes("singletonlock")) return false;
     if (normalized.endsWith(`${path.sep}lock`)) return false;
     if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
+      return false;
+    if (normalized.includes("safe browsing")) return false;
+    if (normalized.includes("safebrowsing")) return false;
+    if (normalized.includes("shadercache")) return false;
     return true;
   };
 
@@ -53,7 +71,6 @@ function cloneAuthProfile(workerProfileDir) {
     filter: skipLockedFiles,
   });
 }
-
 
 function sendStatus(status, detail = "", eventCode = "") {
   if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
@@ -84,8 +101,8 @@ function sendTabStatus(tabId, status, detail = "", eventCode = "") {
 
 function createWindow() {
   win = new BrowserWindow({
-    width: 760,
-    height: 700,
+    width: 860,
+    height: 760,
     resizable: true,
     autoHideMenuBar: true,
     webPreferences: {
@@ -118,14 +135,22 @@ function registerIpc(channel, handler) {
   ipcMain.handle(channel, handler);
 }
 
-function ensureAuthBot() {
-  if (!authBot) {
-    authBot = new BotController({
-      profileDir: getAuthProfileDir(),
-      onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
-    });
-  }
-  return authBot;
+async function ensureBrowserSession(browserType) {
+  const normalizedType = BROWSER_TYPES.includes(browserType)
+    ? browserType
+    : "chrome";
+
+  const existing = browserSessions.get(normalizedType);
+  if (existing) return existing;
+
+  const sessionBot = new BotController({
+    profileDir: getAuthProfileDir(normalizedType),
+    browserType: normalizedType,
+    onStatus: (s, d, e) => sendStatus(`[${normalizedType}] ${s}`, d, e),
+  });
+
+  browserSessions.set(normalizedType, sessionBot);
+  return sessionBot;
 }
 
 async function ensureTabBot(tabId) {
@@ -133,11 +158,7 @@ async function ensureTabBot(tabId) {
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
   if (tab.bot) return tab;
 
-  if (authBot && authBot.browser) {
-    await authBot.stop();
-  }
-
-  cloneAuthProfile(tab.profileDir);
+  cloneAuthProfile(tab.profileDir, tab.browserType);
 
   const bot = new BotController({
     profileDir: tab.profileDir,
@@ -158,15 +179,18 @@ async function stopAllTabs() {
   tabs.clear();
 }
 
-async function handleAuth() {
-  try {
-    const bot = ensureAuthBot();
-    await bot.openAuth();
-    return { ok: true };
-  } catch (e) {
-    sendStatus("Помилка", e.message, "error");
-    return { ok: false, error: e.message };
+async function stopBrowserSessions() {
+  for (const sessionBot of browserSessions.values()) {
+    await sessionBot.softStop();
   }
+}
+
+async function closeAll() {
+  await stopAllTabs();
+  for (const sessionBot of browserSessions.values()) {
+    await sessionBot.stop();
+  }
+  browserSessions.clear();
 }
 
 async function handleAddTab(_event, payload) {
@@ -188,8 +212,8 @@ async function handleAddTab(_event, payload) {
       );
     }
 
-    const bot = ensureAuthBot();
-    await bot.openHelperTab("https://coins.bank.gov.ua/");
+    const sessionBot = await ensureBrowserSession(browserType);
+    await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const tabId = nextTabId;
     nextTabId += 1;
@@ -201,10 +225,12 @@ async function handleAddTab(_event, payload) {
       profileDir: getWorkerProfileDir(tabId, browserType),
     });
 
+    const nextIndex = tabsForBrowser + 1;
+
     sendTabStatus(
       tabId,
       "Готово",
-      `Скопіюй посилання з нової вкладки. При старті відкриється окремий браузер: ${browserType}.`,
+      `${browserType}: вкладка ${nextIndex} відкрита. Авторизуйся в цьому браузері, відкрий монету та встав URL у форму.`,
       "ready",
     );
 
@@ -237,28 +263,6 @@ async function handleStartTab(_event, payload) {
 
 async function handleStartAllTabs(_event, payload) {
   try {
-    const tabIds = Array.isArray(payload && payload.tabIds)
-      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
-      : [];
-
-    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
-      const urlsByTab = (payload && payload.urlsByTab) || {};
-      const url = String(urlsByTab[String(tabId)] || "").trim();
-      if (!url) {
-        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
-        continue;
-      }
-
-      const tab = await ensureTabBot(tabId);
-
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-async function handleStartAllTabs(_event, payload) {
-  try {
     const tabIds = Array.isArray(payload?.tabIds)
       ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
       : [];
@@ -272,10 +276,10 @@ async function handleStartAllTabs(_event, payload) {
 
       const tab = await ensureTabBot(tabId);
 
-      activeTab.bot
+      tab.bot
         .arm({
           url,
-          startAtLocal: (payload && payload.startAtLocal) || null,
+          startAtLocal: payload?.startAtLocal || null,
         })
         .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
     }
@@ -288,10 +292,7 @@ async function handleStartAllTabs(_event, payload) {
 
 app.whenReady().then(() => {
   createWindow();
-  ensureAuthBot();
 
-  registerIpc("auth", handleAuth);
-  registerIpc("auth_v2", handleAuth);
   registerIpc("addTab", handleAddTab);
   registerIpc("addTab_v2", handleAddTab);
   registerIpc("startTab", handleStartTab);
@@ -316,7 +317,7 @@ app.whenReady().then(() => {
   registerIpc("stop", async () => {
     try {
       await stopAllTabs();
-      if (authBot) await authBot.softStop();
+      await stopBrowserSessions();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -328,8 +329,15 @@ app.whenReady().then(() => {
     return {
       ok: true,
       state: {
-        auth: authBot ? authBot.getState() : null,
-        tabs: [...tabs.values()].map((t) => ({ id: t.id, browserType: t.browserType, ...(t.bot ? t.bot.getState() : {}) })),
+        auth: [...browserSessions.entries()].map(([browserType, bot]) => ({
+          browserType,
+          ...bot.getState(),
+        })),
+        tabs: [...tabs.values()].map((t) => ({
+          id: t.id,
+          browserType: t.browserType,
+          ...(t.bot ? t.bot.getState() : {}),
+        })),
       },
     };
   });
@@ -337,8 +345,7 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", async () => {
   try {
-    await stopAllTabs();
-    if (authBot) await authBot.stop();
+    await closeAll();
   } catch {}
   if (process.platform !== "darwin") app.quit();
 });
