@@ -42,6 +42,35 @@ function recreateDirectory(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
+function isIgnorableCopyError(error) {
+  const code = String(error?.code || "").toUpperCase();
+  return ["EBUSY", "EPERM", "EACCES", "ENOENT"].includes(code);
+}
+
+function copyDirectoryLoose(srcDir, dstDir, shouldCopy) {
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const dstPath = path.join(dstDir, entry.name);
+    if (!shouldCopy(srcPath)) continue;
+
+    if (entry.isDirectory()) {
+      fs.mkdirSync(dstPath, { recursive: true });
+      copyDirectoryLoose(srcPath, dstPath, shouldCopy);
+      continue;
+    }
+
+    if (!entry.isFile()) continue;
+
+    try {
+      fs.copyFileSync(srcPath, dstPath);
+    } catch (error) {
+      if (isIgnorableCopyError(error)) continue;
+      throw error;
+    }
+  }
+}
+
 function cloneAuthProfile(workerProfileDir, browserType) {
   const authProfile = getAuthProfileDir(browserType);
   if (!fs.existsSync(authProfile)) {
@@ -66,15 +95,15 @@ function cloneAuthProfile(workerProfileDir, browserType) {
       return false;
     if (normalized.includes("safe browsing")) return false;
     if (normalized.includes("safebrowsing")) return false;
+    if (normalized.includes(`${path.sep}sessions${path.sep}`)) return false;
+    if (normalized.endsWith(`${path.sep}sessions`)) return false;
+    if (normalized.includes(`${path.sep}cache${path.sep}`)) return false;
+    if (normalized.includes(`${path.sep}code cache${path.sep}`)) return false;
     if (normalized.includes("shadercache")) return false;
     return true;
   };
 
-  fs.cpSync(authProfile, workerProfileDir, {
-    recursive: true,
-    force: true,
-    filter: skipLockedFiles,
-  });
+  copyDirectoryLoose(authProfile, workerProfileDir, skipLockedFiles);
 }
 
 function sendStatus(status, detail = "", eventCode = "") {
