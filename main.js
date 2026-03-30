@@ -124,6 +124,12 @@ app.whenReady().then(() => {
 
   ipcMain.handle("auth", async (_, payload) => {
     try {
+      if (!authBot) {
+        authBot = new BotController({
+          profileDir: getAuthProfileDir(),
+          onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
+        });
+      }
       await stopWorkers();
       await authBot.openAuth();
       return { ok: true };

@@ -69,19 +69,32 @@ function setDot(status) {
   else if (kind === "success") dot.classList.add("dot-green");
 }
 
-btnAuth.onclick = async () => {
-  const r = await window.api.auth({
-    accounts: accountsInput.value.trim(),
-    tabs: tabsInput.value,
-  });
-  if (!r.ok) {
-    statusTitle.textContent = "Помилка";
-    statusDetail.textContent = r.error || "";
-    setDot("Помилка");
+async function invokeApi(call) {
+  if (!window.api) {
+    throw new Error("API не ініціалізовано. Перезапусти застосунок.");
   }
-};
+  return call();
+}
 
-btnArm.onclick = async () => {
+btnAuth?.addEventListener("click", async () => {
+  try {
+    btnAuth.disabled = true;
+    const r = await invokeApi(() => window.api.auth());
+    if (!r?.ok) {
+      statusTitle.textContent = "Помилка";
+      statusDetail.textContent = r?.error || "Не вдалося відкрити авторизацію";
+      setDot("Помилка");
+    }
+  } catch (error) {
+    statusTitle.textContent = "Помилка";
+    statusDetail.textContent = error?.message || "Помилка під час авторизації";
+    setDot("Помилка");
+  } finally {
+    btnAuth.disabled = false;
+  }
+});
+
+btnArm?.addEventListener("click", async () => {
   lastSoundEvent = "";
   const payload = {
     urls: urlsInput.value.trim(),
@@ -89,21 +102,23 @@ btnArm.onclick = async () => {
     startAtLocal: startAtInput.value || null,
   };
 
-  const r = await window.api.arm(payload);
+  const r = await invokeApi(() => window.api.arm(payload));
   if (!r || r.ok !== true) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = (r && r.error) || "Не вдалося запустити";
     setDot("Помилка");
   }
-};
-
-btnStop.onclick = async () => {
-  await window.api.stop();
-};
-
-window.api.onStatus(({ status, detail, eventCode }) => {
-  statusTitle.textContent = status;
-  statusDetail.textContent = detail || "";
-  setDot(status);
-  maybePlayStatusSound(eventCode);
 });
+
+btnStop?.addEventListener("click", async () => {
+  await invokeApi(() => window.api.stop());
+});
+
+if (window.api?.onStatus) {
+  window.api.onStatus(({ status, detail, eventCode }) => {
+    statusTitle.textContent = status;
+    statusDetail.textContent = detail || "";
+    setDot(status);
+    maybePlayStatusSound(eventCode);
+  });
+}
