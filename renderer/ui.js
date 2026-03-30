@@ -4,6 +4,8 @@ const btnAuth = $("btnAuth");
 const btnArm = $("btnArm");
 const btnStop = $("btnStop");
 
+const accountsInput = $("accounts");
+const tabsInput = $("tabs");
 const urlInput = $("url");
 const startAtInput = $("startAt");
 
@@ -68,7 +70,10 @@ function setDot(status) {
 }
 
 btnAuth.onclick = async () => {
-  const r = await window.api.auth();
+  const r = await window.api.auth({
+    accounts: accountsInput.value.trim(),
+    tabs: tabsInput.value,
+  });
   if (!r.ok) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = r.error || "";
@@ -79,6 +84,8 @@ btnAuth.onclick = async () => {
 btnArm.onclick = async () => {
   lastSoundEvent = "";
   const payload = {
+    accounts: accountsInput.value.trim(),
+    tabs: tabsInput.value,
     url: urlInput.value.trim(),
     startAtLocal: startAtInput.value || null,
   };
