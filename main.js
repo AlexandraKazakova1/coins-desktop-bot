@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
@@ -17,46 +16,6 @@ function parseTabs(rawTabs) {
 
 function getAuthProfileDir() {
   return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
-}
-
-function getWorkerProfileDir(tabId) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
-}
-
-function recreateDirectory(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-function cloneAuthProfile(workerProfileDir) {
-  const authProfile = getAuthProfileDir();
-  if (!fs.existsSync(authProfile)) {
-    throw new Error("Спочатку натисни «Авторизація» і увійди в акаунт.");
-  }
-
-  recreateDirectory(workerProfileDir);
-
-  const skipLockedFiles = (src) => {
-    const normalized = String(src || "").toLowerCase();
-    if (normalized.includes("singletonlock")) return false;
-    if (normalized.endsWith(`${path.sep}lock`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
-      return false;
-    return true;
-  };
-
-  try {
-    fs.cpSync(authProfile, workerProfileDir, {
-      recursive: true,
-      force: true,
-      filter: skipLockedFiles,
-    });
-  } catch (e) {
-    throw new Error(
-      "Не вдалося створити вкладку з поточної сесії. Натисни «Авторизація», увійди, закрий вікно авторизації і повтори.",
-    );
-  }
 }
 
 function sendStatus(status, detail = "", eventCode = "") {
@@ -115,6 +74,14 @@ function createWindow() {
   });
 }
 
+
+function registerIpc(channel, handler) {
+  try {
+    ipcMain.removeHandler(channel);
+  } catch {}
+  ipcMain.handle(channel, handler);
+}
+
 function ensureAuthBot() {
   if (!authBot) {
     authBot = new BotController({
@@ -133,28 +100,11 @@ async function stopAllTabs() {
   tabs.clear();
 }
 
-function createTabWorker(tabId) {
-  const profileDir = getWorkerProfileDir(tabId);
-  cloneAuthProfile(profileDir);
-
-  const bot = new BotController({
-    profileDir,
-    onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
-  });
-
-  tabs.set(tabId, { id: tabId, bot, profileDir });
-  return tabs.get(tabId);
-}
-
 app.whenReady().then(() => {
   createWindow();
   ensureAuthBot();
 
-app.whenReady().then(() => {
-  createWindow();
-  ensureAuthBot();
-
-  ipcMain.handle("auth", async (_, payload) => {
+  registerIpc("auth", async () => {
     try {
       const bot = ensureAuthBot();
       await bot.openAuth();
@@ -165,34 +115,52 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("addTab", async () => {
+  registerIpc("addTab", async () => {
     try {
       if (tabs.size >= 10) {
         throw new Error("Максимум 10 вкладок на один акаунт.");
       }
 
-      // Закриваємо auth-вікно перед копіюванням профілю, щоб не було lock-файлів.
-      if (authBot?.browser) {
-        await authBot.stop();
-      }
+      const bot = ensureAuthBot();
+      const helperPage = await bot.openHelperTab("https://coins.bank.gov.ua/");
 
       const tabId = nextTabId;
       nextTabId += 1;
-      createTabWorker(tabId);
+
+      const tabBot = new BotController({
+        profileDir: getAuthProfileDir(),
+        browser: bot.browser,
+        page: helperPage,
+        ownsBrowser: false,
+        onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
+      });
+
+      tabs.set(tabId, {
+        id: tabId,
+        bot: tabBot,
+      });
+
+      sendTabStatus(
+        tabId,
+        "Готово",
+        "Скопіюй посилання саме з цієї вкладки й встав у поле. Пошук піде в цій же вкладці.",
+        "ready",
+      );
+
       return { ok: true, tabId };
     } catch (e) {
       return { ok: false, error: e.message };
     }
   });
 
-  ipcMain.handle("startTab", async (_event, payload) => {
+  registerIpc("startTab", async (_event, payload) => {
     try {
       const tabId = Number(payload?.tabId);
       const url = String(payload?.url || "").trim();
       if (!url) throw new Error("Вкажи URL товару для вкладки.");
 
       const tab = tabs.get(tabId);
-      if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
+      if (!tab?.bot) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
 
       tab.bot
         .arm({
@@ -207,7 +175,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("startAllTabs", async (_event, payload) => {
+  registerIpc("startAllTabs", async (_event, payload) => {
     try {
       const tabIds = Array.isArray(payload?.tabIds)
         ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
@@ -215,7 +183,7 @@ app.whenReady().then(() => {
 
       for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
         const tab = tabs.get(tabId);
-        if (!tab) continue;
+        if (!tab?.bot) continue;
 
         const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
         if (!url) {
@@ -237,11 +205,11 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("stopTab", async (_event, payload) => {
+  registerIpc("stopTab", async (_event, payload) => {
     try {
       const tabId = Number(payload?.tabId);
       const tab = tabs.get(tabId);
-      if (!tab) return { ok: true };
+      if (!tab?.bot) return { ok: true };
 
       await tab.bot.stop();
       sendTabStatus(tabId, "Готово", "Вкладку зупинено", "ready");
@@ -251,7 +219,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("stop", async () => {
+  registerIpc("stop", async () => {
     try {
       await stopAllTabs();
       await authBot?.softStop();
@@ -262,12 +230,12 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("getStatus", async () => {
+  registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
         auth: authBot?.getState(),
-        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...t.bot.getState() })),
+        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...(t.bot ? t.bot.getState() : {}) })),
       },
     };
   });
