@@ -4,7 +4,8 @@ const btnAuth = $("btnAuth");
 const btnArm = $("btnArm");
 const btnStop = $("btnStop");
 
-const urlInput = $("url");
+const urlsInput = $("urls");
+const tabsInput = $("tabs");
 const startAtInput = $("startAt");
 
 const dot = $("dot");
@@ -59,45 +60,65 @@ function maybePlayStatusSound(eventCode) {
 }
 
 function setDot(status) {
+  const normalizedStatus = String(status || "").replace(/^\[[^\]]+\]\s*/, "");
   dot.className = "dot";
-  const kind = STATUS_COLOR[status] || "idle";
+  const kind = STATUS_COLOR[normalizedStatus] || "idle";
 
   if (kind === "error") dot.classList.add("dot-red");
   else if (kind === "pending") dot.classList.add("dot-yellow");
   else if (kind === "success") dot.classList.add("dot-green");
 }
 
-btnAuth.onclick = async () => {
-  const r = await window.api.auth();
-  if (!r.ok) {
-    statusTitle.textContent = "Помилка";
-    statusDetail.textContent = r.error || "";
-    setDot("Помилка");
+async function invokeApi(call) {
+  if (!window.api) {
+    throw new Error("API не ініціалізовано. Перезапусти застосунок.");
   }
-};
+  return call();
+}
 
-btnArm.onclick = async () => {
+btnAuth?.addEventListener("click", async () => {
+  try {
+    btnAuth.disabled = true;
+    const r = await invokeApi(() => window.api.auth());
+    if (!r?.ok) {
+      statusTitle.textContent = "Помилка";
+      statusDetail.textContent = r?.error || "Не вдалося відкрити авторизацію";
+      setDot("Помилка");
+    }
+  } catch (error) {
+    statusTitle.textContent = "Помилка";
+    statusDetail.textContent = error?.message || "Помилка під час авторизації";
+    setDot("Помилка");
+  } finally {
+    btnAuth.disabled = false;
+  }
+});
+
+btnArm?.addEventListener("click", async () => {
   lastSoundEvent = "";
   const payload = {
-    url: urlInput.value.trim(),
+    urls: urlsInput.value.trim(),
+    tabs: tabsInput.value,
     startAtLocal: startAtInput.value || null,
   };
 
-  const r = await window.api.arm(payload);
+  const r = await invokeApi(() => window.api.arm(payload));
   if (!r || r.ok !== true) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = (r && r.error) || "Не вдалося запустити";
     setDot("Помилка");
   }
-};
-
-btnStop.onclick = async () => {
-  await window.api.stop();
-};
-
-window.api.onStatus(({ status, detail, eventCode }) => {
-  statusTitle.textContent = status;
-  statusDetail.textContent = detail || "";
-  setDot(status);
-  maybePlayStatusSound(eventCode);
 });
+
+btnStop?.addEventListener("click", async () => {
+  await invokeApi(() => window.api.stop());
+});
+
+if (window.api?.onStatus) {
+  window.api.onStatus(({ status, detail, eventCode }) => {
+    statusTitle.textContent = status;
+    statusDetail.textContent = detail || "";
+    setDot(status);
+    maybePlayStatusSound(eventCode);
+  });
+}
