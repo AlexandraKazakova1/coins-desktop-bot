@@ -102,6 +102,12 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
+function hasChromiumProfileMarkers(profileDir) {
+  if (!fs.existsSync(profileDir)) return false;
+  const markers = ["Local State", "First Run", "Default", "Last Version"];
+  return markers.some((name) => fs.existsSync(path.join(profileDir, name)));
+}
+
 function chromePaths() {
   return [
     "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
@@ -446,6 +452,10 @@ class BotController {
       .toLowerCase()
       .includes("firefox.exe");
     if (this.browserType === "firefox" && isNativeFirefox) {
+      if (hasChromiumProfileMarkers(this.profileDir)) {
+        fs.rmSync(this.profileDir, { recursive: true, force: true });
+        fs.mkdirSync(this.profileDir, { recursive: true });
+      }
       launchOptions.product = "firefox";
       launchOptions.ignoreDefaultArgs = undefined;
       launchOptions.args = [];
