@@ -21,15 +21,10 @@ function getAuthProfileDir() {
   return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
 }
 
-<<<<<<< HEAD
+
 
 function getWorkerProfileDir(tabId) {
   return path.join(app.getPath("userData"), "chrome-profiles", `tab-${tabId}`);
-=======
-function getWorkerProfileDir(tabId, browserType) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
->>>>>>> 288fb4330f5f5e58d4d26591a95bf06ed55ab54d
-}
 
 function recreateDirectory(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
