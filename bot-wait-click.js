@@ -57,7 +57,9 @@ class WaitClickBot {
         return await node.evaluate((el) => {
           const style = window.getComputedStyle(el);
           const rect = el.getBoundingClientRect();
-          const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+          const text = (el.innerText || el.textContent || "")
+            .toLowerCase()
+            .trim();
           const semanticText = [
             text,
             el.getAttribute("aria-label") || "",
@@ -105,13 +107,18 @@ class WaitClickBot {
           const enabled =
             !el.hasAttribute("disabled") &&
             el.getAttribute("aria-disabled") !== "true" &&
-            !String(el.className || "").toLowerCase().includes("disabled") &&
-            !String(el.className || "").toLowerCase().includes("inactive");
+            !String(el.className || "")
+              .toLowerCase()
+              .includes("disabled") &&
+            !String(el.className || "")
+              .toLowerCase()
+              .includes("inactive");
 
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
           const topElement = document.elementFromPoint(cx, cy);
-          const notCovered = !topElement || topElement === el || el.contains(topElement);
+          const notCovered =
+            !topElement || topElement === el || el.contains(topElement);
 
           return (
             visible &&
@@ -138,9 +145,13 @@ class WaitClickBot {
     }
 
     const handle = await this.page.evaluateHandle(() => {
-      const controls = [...document.querySelectorAll("button, a, [role='button']")];
+      const controls = [
+        ...document.querySelectorAll("button, a, [role='button']"),
+      ];
       const byText = controls.find((el) => {
-        const text = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const text = (el.innerText || el.textContent || "")
+          .toLowerCase()
+          .trim();
         const semanticText = [
           text,
           el.getAttribute("aria-label") || "",
@@ -181,7 +192,9 @@ class WaitClickBot {
           enabled &&
           !looksLikeInCart &&
           !looksLikeCaptcha &&
-          (text.includes("купити") || text.includes("в кошик") || text.includes("buy"))
+          (text.includes("купити") ||
+            text.includes("в кошик") ||
+            text.includes("buy"))
         );
       });
       return byText || null;
@@ -203,22 +216,12 @@ class WaitClickBot {
     } catch {}
 
     const box = await buttonHandle.boundingBox();
-    if (!box) throw new Error('Не удалось кликнуть "Купить": кнопка недоступна.');
+    if (!box)
+      throw new Error('Не удалось кликнуть "Купить": кнопка недоступна.');
     await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, {
       delay: 10,
     });
   }
 }
 
-async function createBot({ browserWSEndpoint, targetUrl }) {
-  const browser = await puppeteer.connect({ browserWSEndpoint });
-  const page = await browser.newPage();
-  await page.goto(targetUrl, { waitUntil: "domcontentloaded" });
-
-  const bot = new WaitClickBot(page);
-  await bot.start();
-
-  return { bot, browser, page };
-}
-
-module.exports = { WaitClickBot, createBot, BUY_SELECTORS };
+module.exports = WaitClickBot;
