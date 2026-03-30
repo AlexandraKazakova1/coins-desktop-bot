@@ -201,32 +201,30 @@ async function ensureTabBot(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
   if (tab.bot) return tab;
-
-  cloneAuthProfile(tab.profileDir, tab.browserType);
-
-  const bot = new BotController({
-    profileDir: tab.profileDir,
-    browserType: tab.browserType,
-    onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
-  });
-
-  const updated = { ...tab, bot };
-  tabs.set(tabId, updated);
-  return updated;
+  throw new Error("Вкладка не ініціалізована. Створи її заново кнопкою браузера.");
 }
 
-async function stopAllTabs() {
+async function stopAllTabs({ closePages = false } = {}) {
   for (const tab of tabs.values()) {
     if (!tab.bot) continue;
-    await tab.bot.stop();
+    if (closePages) await tab.bot.stop();
+    else await tab.bot.softStop();
   }
-  tabs.clear();
+  if (closePages) tabs.clear();
 }
 
 async function stopBrowserSessions() {
   for (const sessionBot of browserSessions.values()) {
     await sessionBot.softStop();
   }
+}
+
+async function closeAll() {
+  await stopAllTabs({ closePages: true });
+  for (const sessionBot of browserSessions.values()) {
+    await sessionBot.stop();
+  }
+  browserSessions.clear();
 }
 
 async function closeAll() {
@@ -263,16 +261,25 @@ async function handleAddTab(_event, payload) {
     }
 
     const sessionBot = await ensureBrowserSession(browserType);
-    await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
+    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const tabId = nextTabId;
     nextTabId += 1;
 
+    const bot = new BotController({
+      profileDir: getAuthProfileDir(browserType),
+      browserType,
+      browser: sessionBot.browser,
+      page: helperTab,
+      ownsBrowser: false,
+      onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
+    });
+
     tabs.set(tabId, {
       id: tabId,
       browserType,
-      bot: null,
-      profileDir: getWorkerProfileDir(tabId, browserType),
+      bot,
+      profileDir: getAuthProfileDir(browserType),
     });
 
     const nextIndex = tabsForBrowser + 1;
@@ -358,7 +365,7 @@ app.whenReady().then(() => {
       const tab = tabs.get(tabId);
       if (!tab || !tab.bot) return { ok: true };
 
-      await tab.bot.stop();
+      await tab.bot.softStop();
       sendTabStatus(tabId, "Готово", "Вкладку зупинено", "ready");
       return { ok: true };
     } catch (e) {
