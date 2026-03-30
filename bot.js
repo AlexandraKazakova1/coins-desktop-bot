@@ -114,12 +114,13 @@ function chromePaths() {
 }
 
 class BotController {
-  constructor({ profileDir, onStatus }) {
+  constructor({ profileDir, onStatus, browser = null, page = null, ownsBrowser = true }) {
     this.profileDir = profileDir;
     ensureDir(profileDir);
-    this.onStatus = onStatus;
-    this.browser = null;
-    this.page = null;
+    this.onStatus = onStatus || (() => {});
+    this.browser = browser;
+    this.page = page;
+    this.ownsBrowser = ownsBrowser;
     this.tracking = false;
     this.waitingCaptcha = false;
     this.state = BOT_STATES.READY;
@@ -333,6 +334,22 @@ class BotController {
     await this.page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, "webdriver", { get: () => undefined });
     });
+  }
+
+
+  async openHelperTab(url = "https://coins.bank.gov.ua/") {
+    await this._ensurePage();
+
+    const helperTab = await this.browser.newPage();
+    this.page = helperTab;
+    await helperTab.goto(url, { waitUntil: "domcontentloaded" });
+
+    try {
+      if (helperTab.bringToFront) await helperTab.bringToFront();
+    } catch {}
+
+    this._status(BOT_STATES.AUTH, "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.");
+    return helperTab;
   }
 
   async openAuth() {
@@ -679,6 +696,19 @@ class BotController {
   async stop() {
     this.tracking = false;
     this.waitingCaptcha = false;
+
+    if (!this.ownsBrowser) {
+      try {
+        if (this.page && this.page.isClosed?.() !== true) {
+          await this.page.close();
+        }
+      } catch {}
+      this.page = null;
+      this.browser = null;
+      this._status(BOT_STATES.READY);
+      return;
+    }
+
     if (this.browser) await this.browser.close();
     this.browser = null;
     this.page = null;
