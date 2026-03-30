@@ -3,6 +3,9 @@ const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
 const { BotController } = require("./bot");
 
+const MAX_BROWSERS = 3;
+const BROWSER_TYPES = ["chrome", "opera", "firefox"];
+
 let win;
 let authBot = null;
 let nextTabId = 1;
@@ -11,11 +14,44 @@ const tabs = new Map();
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
   if (!Number.isFinite(tabsCount)) return 1;
-  return Math.max(1, Math.min(10, Math.floor(tabsCount)));
+  return Math.max(1, Math.min(MAX_BROWSERS, Math.floor(tabsCount)));
 }
 
 function getAuthProfileDir() {
   return path.join(app.getPath("userData"), "chrome-profiles", "authorized");
+}
+
+function getWorkerProfileDir(tabId, browserType) {
+  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
+}
+
+function recreateDirectory(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+}
+
+function cloneAuthProfile(workerProfileDir) {
+  const authProfile = getAuthProfileDir();
+  if (!fs.existsSync(authProfile)) {
+    throw new Error("Спочатку натисни «Авторизація» і увійди в акаунт.");
+  }
+
+  recreateDirectory(workerProfileDir);
+
+  const skipLockedFiles = (src) => {
+    const normalized = String(src || "").toLowerCase();
+    if (normalized.includes("singletonlock")) return false;
+    if (normalized.endsWith(`${path.sep}lock`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`)) return false;
+    return true;
+  };
+
+  fs.cpSync(authProfile, workerProfileDir, {
+    recursive: true,
+    force: true,
+    filter: skipLockedFiles,
+  });
 }
 
 function sendStatus(status, detail = "", eventCode = "") {
@@ -74,7 +110,6 @@ function createWindow() {
   });
 }
 
-
 function registerIpc(channel, handler) {
   try {
     ipcMain.removeHandler(channel);
@@ -89,78 +124,119 @@ function ensureAuthBot() {
       onStatus: (s, d, e) => sendStatus(`[Авторизація] ${s}`, d, e),
     });
   }
-
   return authBot;
+}
+
+async function ensureTabBot(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
+  if (tab.bot) return tab;
+
+  if (authBot?.browser) {
+    await authBot.stop();
+  }
+
+  cloneAuthProfile(tab.profileDir);
+
+  const bot = new BotController({
+    profileDir: tab.profileDir,
+    browserType: tab.browserType,
+    onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
+  });
+
+  const updated = { ...tab, bot };
+  tabs.set(tabId, updated);
+  return updated;
 }
 
 async function stopAllTabs() {
   for (const tab of tabs.values()) {
+    if (!tab.bot) continue;
     await tab.bot.stop();
   }
   tabs.clear();
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  ensureAuthBot();
+async function handleAuth() {
+  try {
+    const bot = ensureAuthBot();
+    await bot.openAuth();
+    return { ok: true };
+  } catch (e) {
+    sendStatus("Помилка", e.message, "error");
+    return { ok: false, error: e.message };
+  }
+}
 
-  registerIpc("auth", async () => {
-    try {
-      const bot = ensureAuthBot();
-      await bot.openAuth();
-      return { ok: true };
-    } catch (e) {
-      sendStatus("Помилка", e.message, "error");
-      return { ok: false, error: e.message };
+async function handleAddTab() {
+  try {
+    if (tabs.size >= MAX_BROWSERS) {
+      throw new Error(`Максимум ${MAX_BROWSERS} окремі браузери.`);
     }
-  });
 
-  registerIpc("addTab", async () => {
-    try {
-      if (tabs.size >= 10) {
-        throw new Error("Максимум 10 вкладок на один акаунт.");
+    const bot = ensureAuthBot();
+    await bot.openHelperTab("https://coins.bank.gov.ua/");
+
+    const tabId = nextTabId;
+    nextTabId += 1;
+
+    const browserType = BROWSER_TYPES[(tabId - 1) % BROWSER_TYPES.length];
+
+    tabs.set(tabId, {
+      id: tabId,
+      browserType,
+      bot: null,
+      profileDir: getWorkerProfileDir(tabId, browserType),
+    });
+
+    sendTabStatus(
+      tabId,
+      "Готово",
+      `Скопіюй посилання з нової вкладки. При старті відкриється окремий браузер: ${browserType}.`,
+      "ready",
+    );
+
+    return { ok: true, tabId };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartTab(_event, payload) {
+  try {
+    const tabId = Number(payload?.tabId);
+    const url = String(payload?.url || "").trim();
+    if (!url) throw new Error("Вкажи URL товару для вкладки.");
+
+    const tab = await ensureTabBot(tabId);
+
+    tab.bot
+      .arm({
+        url,
+        startAtLocal: payload?.startAtLocal || null,
+      })
+      .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
+
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+async function handleStartAllTabs(_event, payload) {
+  try {
+    const tabIds = Array.isArray(payload?.tabIds)
+      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+      : [];
+
+    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
+      const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
+      if (!url) {
+        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
+        continue;
       }
 
-      const bot = ensureAuthBot();
-      const helperPage = await bot.openHelperTab("https://coins.bank.gov.ua/");
-
-      const tabId = nextTabId;
-      nextTabId += 1;
-
-      const tabBot = new BotController({
-        profileDir: getAuthProfileDir(),
-        browser: bot.browser,
-        page: helperPage,
-        ownsBrowser: false,
-        onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
-      });
-
-      tabs.set(tabId, {
-        id: tabId,
-        bot: tabBot,
-      });
-
-      sendTabStatus(
-        tabId,
-        "Готово",
-        "Скопіюй посилання саме з цієї вкладки й встав у поле. Пошук піде в цій же вкладці.",
-        "ready",
-      );
-
-      return { ok: true, tabId };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  });
-
-  registerIpc("startTab", async (_event, payload) => {
-    try {
-      const tabId = Number(payload?.tabId);
-      const url = String(payload?.url || "").trim();
-      if (!url) throw new Error("Вкажи URL товару для вкладки.");
-
-      const tab = tabs.get(tabId);
-      if (!tab?.bot) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
+      const tab = await ensureTabBot(tabId);
 
       activeTab.bot
         .arm({
@@ -168,44 +244,26 @@ app.whenReady().then(() => {
           startAtLocal: payload?.startAtLocal || null,
         })
         .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
-
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e.message };
     }
-  });
 
-  registerIpc("startAllTabs", async (_event, payload) => {
-    try {
-      const tabIds = Array.isArray(payload?.tabIds)
-        ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
-        : [];
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
 
-      await prepareWorkersFromAuth();
+app.whenReady().then(() => {
+  createWindow();
+  ensureAuthBot();
 
-      for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
-        const tab = tabs.get(tabId);
-        if (!tab?.bot) continue;
-
-        const url = String(payload?.urlsByTab?.[String(tabId)] || "").trim();
-        if (!url) {
-          sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
-          continue;
-        }
-
-        tab.bot
-          .arm({
-            url,
-            startAtLocal: payload?.startAtLocal || null,
-          })
-          .catch((e) => sendTabStatus(tabId, "Помилка", e.message, "error"));
-      }
-
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e.message };
-    }
-  });
+  registerIpc("auth", handleAuth);
+  registerIpc("auth_v2", handleAuth);
+  registerIpc("addTab", handleAddTab);
+  registerIpc("addTab_v2", handleAddTab);
+  registerIpc("startTab", handleStartTab);
+  registerIpc("startTab_v2", handleStartTab);
+  registerIpc("startAllTabs", handleStartAllTabs);
+  registerIpc("startAllTabs_v2", handleStartAllTabs);
 
   registerIpc("stopTab", async (_event, payload) => {
     try {
@@ -237,7 +295,7 @@ app.whenReady().then(() => {
       ok: true,
       state: {
         auth: authBot?.getState(),
-        tabs: [...tabs.values()].map((t) => ({ id: t.id, ...(t.bot ? t.bot.getState() : {}) })),
+        tabs: [...tabs.values()].map((t) => ({ id: t.id, browserType: t.browserType, ...(t.bot ? t.bot.getState() : {}) })),
       },
     };
   });
