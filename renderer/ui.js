@@ -70,7 +70,10 @@ function setDot(status) {
 }
 
 btnAuth.onclick = async () => {
-  const r = await window.api.auth();
+  const r = await window.api.auth({
+    accounts: accountsInput.value.trim(),
+    tabs: tabsInput.value,
+  });
   if (!r.ok) {
     statusTitle.textContent = "Помилка";
     statusDetail.textContent = r.error || "";

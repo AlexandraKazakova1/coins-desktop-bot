@@ -122,7 +122,7 @@ app.whenReady().then(() => {
 
   // --- IPC API ---
 
-  ipcMain.handle("auth", async () => {
+  ipcMain.handle("auth", async (_, payload) => {
     try {
       await stopWorkers();
       await authBot.openAuth();
