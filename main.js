@@ -59,6 +59,9 @@ function cloneAuthProfile(workerProfileDir, browserType) {
     if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
     if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
       return false;
+    if (normalized.includes("safe browsing")) return false;
+    if (normalized.includes("safebrowsing")) return false;
+    if (normalized.includes("shadercache")) return false;
     return true;
   };
 
