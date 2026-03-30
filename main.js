@@ -150,7 +150,11 @@ app.whenReady().then(() => {
   createWindow();
   ensureAuthBot();
 
-  ipcMain.handle("auth", async () => {
+app.whenReady().then(() => {
+  createWindow();
+  ensureAuthBot();
+
+  ipcMain.handle("auth", async (_, payload) => {
     try {
       const bot = ensureAuthBot();
       await bot.openAuth();
