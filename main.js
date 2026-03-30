@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
@@ -239,7 +238,7 @@ async function handleStartAllTabs(_event, payload) {
 
       const tab = await ensureTabBot(tabId);
 
-      tab.bot
+      activeTab.bot
         .arm({
           url,
           startAtLocal: payload?.startAtLocal || null,
