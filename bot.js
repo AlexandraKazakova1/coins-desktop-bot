@@ -335,6 +335,22 @@ class BotController {
     });
   }
 
+
+  async openHelperTab(url = "https://coins.bank.gov.ua/") {
+    await this._ensurePage();
+
+    const helperTab = await this.browser.newPage();
+    this.page = helperTab;
+    await helperTab.goto(url, { waitUntil: "domcontentloaded" });
+
+    try {
+      if (helperTab.bringToFront) await helperTab.bringToFront();
+    } catch {}
+
+    this._status(BOT_STATES.AUTH, "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.");
+    return helperTab;
+  }
+
   async openAuth() {
     await this._ensurePage();
     await this._focusCoinsTab();

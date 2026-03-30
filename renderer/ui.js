@@ -146,9 +146,12 @@ btnAddTab?.addEventListener("click", async () => {
     id: r.tabId,
     url: "",
     status: "Готово",
-    detail: "",
+    detail: "Скопіюй посилання з нової вкладки браузера та встав сюди.",
   });
   renderTab(r.tabId);
+  statusTitle.textContent = "Вкладку додано";
+  statusDetail.textContent = "У браузері відкрито нову вкладку. Скопіюй URL та встав у поле вкладки.";
+  setDot("Готово");
 });
 
 btnStartAll?.addEventListener("click", async () => {
