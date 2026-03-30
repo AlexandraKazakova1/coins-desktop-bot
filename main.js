@@ -4,7 +4,70 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const { BotController } = require("./bot");
 
 let win;
-let bot;
+let bots = [];
+
+function slugifyAccountName(raw, fallbackIndex = 0) {
+  const normalized = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-zа-яіїєґ0-9]+/giu, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || `account-${fallbackIndex + 1}`;
+}
+
+function parseAccounts(rawAccounts) {
+  const source = String(rawAccounts || "").trim();
+  if (!source) return ["default"];
+
+  const unique = [];
+  const seen = new Set();
+  const parts = source.split(/[\n,;]+/g).map((item) => item.trim());
+
+  for (const part of parts) {
+    if (!part) continue;
+    const key = part.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(part);
+  }
+
+  return unique.length > 0 ? unique : ["default"];
+}
+
+function parseTabs(rawTabs) {
+  const tabs = Number(rawTabs);
+  if (!Number.isFinite(tabs)) return 1;
+  return Math.max(1, Math.min(10, Math.floor(tabs)));
+}
+
+function createBotsForConfig(rawAccounts, rawTabs) {
+  const accounts = parseAccounts(rawAccounts);
+  const tabsPerAccount = parseTabs(rawTabs);
+  const nextBots = [];
+
+  for (let i = 0; i < accounts.length; i += 1) {
+    const accountName = accounts[i];
+    const accountSlug = slugifyAccountName(accountName, i);
+
+    for (let tab = 1; tab <= tabsPerAccount; tab += 1) {
+      const label = `${accountName} · вкладка ${tab}`;
+      const bot = new BotController({
+        profileDir: path.join(
+          app.getPath("userData"),
+          "chrome-profiles",
+          accountSlug,
+          `tab-${tab}`,
+        ),
+        onStatus: (s, d, e) => sendStatus(`[${label}] ${s}`, d, e),
+      });
+
+      nextBots.push(bot);
+    }
+  }
+
+  return nextBots;
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -56,16 +119,22 @@ function sendStatus(status, detail = "", eventCode = "") {
 app.whenReady().then(() => {
   createWindow();
 
-  bot = new BotController({
-    profileDir: path.join(app.getPath("userData"), "chrome-profile"),
-    onStatus: (s, d, e) => sendStatus(s, d, e),
-  });
+  bots = createBotsForConfig("", 1);
 
   // --- IPC API ---
 
-  ipcMain.handle("auth", async () => {
+  ipcMain.handle("auth", async (_, payload) => {
     try {
-      await bot.openAuth();
+      const nextBots = createBotsForConfig(payload?.accounts, payload?.tabs);
+
+      for (const runningBot of bots) {
+        await runningBot.stop();
+      }
+      bots = nextBots;
+
+      for (const bot of bots) {
+        await bot.openAuth();
+      }
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -75,7 +144,9 @@ app.whenReady().then(() => {
 
   ipcMain.handle("stop", async () => {
     try {
-      await bot.stop();
+      for (const bot of bots) {
+        await bot.stop();
+      }
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -84,13 +155,20 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle("getStatus", async () => {
-    return { ok: true, state: bot.getState() };
+    return { ok: true, state: bots.map((bot) => bot.getState()) };
   });
 
   ipcMain.handle("arm", async (_, payload) => {
     try {
       // запуск у фоні, не блокуємо UI
-      bot.arm(payload).catch((e) => sendStatus("Помилка", e.message, "error"));
+      if (!bots.length) {
+        bots = createBotsForConfig(payload?.accounts, payload?.tabs);
+      }
+
+      for (const bot of bots) {
+        bot.arm(payload).catch((e) => sendStatus("Помилка", e.message, "error"));
+      }
+
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -101,7 +179,9 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", async () => {
   try {
-    await bot?.stop();
+    for (const bot of bots) {
+      await bot.stop();
+    }
   } catch {}
   if (process.platform !== "darwin") app.quit();
 });

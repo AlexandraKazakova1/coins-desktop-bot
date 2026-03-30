@@ -25,13 +25,19 @@ h1 {
   margin-bottom: 6px;
   opacity: 0.9;
 }
-input {
+input,
+textarea {
   width: 90%;
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid #2b3b52;
   background: #0f1620;
   color: #e8eef7;
+}
+textarea {
+  resize: vertical;
+  min-height: 68px;
+  font-family: inherit;
 }
 button {
   padding: 10px 12px;
