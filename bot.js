@@ -578,7 +578,7 @@ class BotController {
     );
     await sleep(30);
 
-    await this._clickWithQuickRetries(btn, 3);
+    await this._clickWithQuickRetries(btn, 1);
 
     const clickSentAt = Date.now();
     console.log(
@@ -633,13 +633,14 @@ class BotController {
       );
     } catch {}
 
-    await this._clickWithQuickRetries(btn, 3);
+    await this._clickWithQuickRetries(btn, 1);
   }
 
   async _clickWithQuickRetries(btn, maxAttempts = 3) {
+    const attempts = Math.max(1, Number(maxAttempts) || 1);
     let lastError = null;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         await btn.click({ delay: 10 });
         return;
@@ -663,7 +664,7 @@ class BotController {
         lastError = err;
       }
 
-      if (attempt < maxAttempts) {
+      if (attempt < attempts) {
         await sleep(randomBetween(100, 300));
       }
     }
@@ -1159,7 +1160,7 @@ class BotController {
     this.waitingCaptcha = true;
     this._status(
       BOT_STATES.WAIT_CLOUDFLARE,
-      "Потрібно пройти «Я не робот» вручну. Автоклік тимчасово вимкнений, після проходження продовжу відстеження.",
+      "Потрібно пройти «Я не робот» вручну. Після одного кліку автодотискання вимкнено.",
     );
 
     while (this.tracking && this.waitingCaptcha) {
@@ -1176,45 +1177,8 @@ class BotController {
     this.waitingCaptcha = false;
     this._status(
       BOT_STATES.WAIT_BUY,
-      "Перевірку пройдено. Пробую натиснути «Купити» автоматично.",
+      "Перевірку пройдено. Очікую кнопку «Купити» без повторних автокліків.",
     );
-
-    let attempt = 1;
-    while (this.tracking && attempt <= 5) {
-      this._status(
-        BOT_STATES.RETRY_AFTER_CAPTCHA,
-        `Спроба ${attempt}/5 після перевірки «Я не робот».`,
-      );
-
-      try {
-        await this._fastClick();
-      } catch (error) {
-        attempt += 1;
-        await sleep(180);
-        continue;
-      }
-
-      const result = await this._waitAddedByCartCount(_beforeCount, 4000);
-      if (result === "added") return "added";
-      if (result === "captcha") {
-        this.waitingCaptcha = true;
-        this._status(
-          BOT_STATES.WAIT_CLOUDFLARE,
-          "Challenge зʼявився знову. Пройди вручну, потім продовжу автоклік.",
-        );
-
-        while (this.tracking && this.waitingCaptcha) {
-          const visible = await this._isCaptchaStillVisible();
-          if (!visible) break;
-          await sleep(500);
-        }
-        this.waitingCaptcha = false;
-      }
-
-      attempt += 1;
-      await sleep(150);
-    }
-
     return "manual_done";
   }
 
