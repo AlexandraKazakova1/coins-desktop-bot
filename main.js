@@ -14,7 +14,10 @@ const tabs = new Map();
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
   if (!Number.isFinite(tabsCount)) return 1;
-  return Math.max(1, Math.min(MAX_PER_BROWSER * BROWSER_TYPES.length, Math.floor(tabsCount)));
+  return Math.max(
+    1,
+    Math.min(MAX_PER_BROWSER * BROWSER_TYPES.length, Math.floor(tabsCount)),
+  );
 }
 
 function getAuthProfileDir() {
@@ -22,7 +25,11 @@ function getAuthProfileDir() {
 }
 
 function getWorkerProfileDir(tabId, browserType) {
-  return path.join(app.getPath("userData"), "chrome-profiles", `${browserType}-browser-${tabId}`);
+  return path.join(
+    app.getPath("userData"),
+    "chrome-profiles",
+    `${browserType}-browser-${tabId}`,
+  );
 }
 
 function recreateDirectory(dir) {
@@ -42,8 +49,10 @@ function cloneAuthProfile(workerProfileDir) {
     const normalized = String(src || "").toLowerCase();
     if (normalized.includes("singletonlock")) return false;
     if (normalized.endsWith(`${path.sep}lock`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`)) return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies`))
+      return false;
+    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
+      return false;
     return true;
   };
 
@@ -54,9 +63,13 @@ function cloneAuthProfile(workerProfileDir) {
   });
 }
 
-
 function sendStatus(status, detail = "", eventCode = "") {
-  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !win.webContents ||
+    win.webContents.isDestroyed()
+  ) {
     return;
   }
 
@@ -69,7 +82,12 @@ function sendStatus(status, detail = "", eventCode = "") {
 }
 
 function sendTabStatus(tabId, status, detail = "", eventCode = "") {
-  if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !win.webContents ||
+    win.webContents.isDestroyed()
+  ) {
     return;
   }
 
@@ -171,15 +189,21 @@ async function handleAuth() {
 
 async function handleAddTab(_event, payload) {
   try {
-    const requestedType = String((payload && payload.browserType) || "").toLowerCase();
-    const browserType = BROWSER_TYPES.includes(requestedType) ? requestedType : "chrome";
+    const requestedType = String(
+      (payload && payload.browserType) || "",
+    ).toLowerCase();
+    const browserType = BROWSER_TYPES.includes(requestedType)
+      ? requestedType
+      : "chrome";
 
     const tabsForBrowser = [...tabs.values()].filter(
       (tab) => tab.browserType === browserType,
     ).length;
 
     if (tabsForBrowser >= MAX_PER_BROWSER) {
-      throw new Error(`Для ${browserType} максимум ${MAX_PER_BROWSER} вкладки.`);
+      throw new Error(
+        `Для ${browserType} максимум ${MAX_PER_BROWSER} вкладки.`,
+      );
     }
 
     if (tabs.size >= MAX_PER_BROWSER * BROWSER_TYPES.length) {
@@ -237,30 +261,10 @@ async function handleStartTab(_event, payload) {
 
 async function handleStartAllTabs(_event, payload) {
   try {
-    const tabIds = Array.isArray(payload && payload.tabIds)
-      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
-      : [];
-
-    for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
-      const urlsByTab = (payload && payload.urlsByTab) || {};
-      const url = String(urlsByTab[String(tabId)] || "").trim();
-      if (!url) {
-        sendTabStatus(tabId, "Помилка", "Вкажи URL для цієї вкладки", "error");
-        continue;
-      }
-
-      const tab = await ensureTabBot(tabId);
-
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
-async function handleStartAllTabs(_event, payload) {
-  try {
     const tabIds = Array.isArray(payload?.tabIds)
-      ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
+      ? payload.tabIds
+          .map((id) => Number(id))
+          .filter((id) => Number.isFinite(id))
       : [];
 
     for (const tabId of tabIds.slice(0, parseTabs(tabIds.length))) {
@@ -272,7 +276,7 @@ async function handleStartAllTabs(_event, payload) {
 
       const tab = await ensureTabBot(tabId);
 
-      activeTab.bot
+      tab.bot
         .arm({
           url,
           startAtLocal: (payload && payload.startAtLocal) || null,
@@ -329,7 +333,11 @@ app.whenReady().then(() => {
       ok: true,
       state: {
         auth: authBot ? authBot.getState() : null,
-        tabs: [...tabs.values()].map((t) => ({ id: t.id, browserType: t.browserType, ...(t.bot ? t.bot.getState() : {}) })),
+        tabs: [...tabs.values()].map((t) => ({
+          id: t.id,
+          browserType: t.browserType,
+          ...(t.bot ? t.bot.getState() : {}),
+        })),
       },
     };
   });
