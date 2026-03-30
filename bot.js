@@ -712,10 +712,9 @@ class BotController {
             return;
           } else {
             this._status(
-              BOT_STATES.ERROR,
-              "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+              BOT_STATES.WAIT_BUY,
+              "Клік виконано, але додавання не підтверджено. Продовжую чекати кнопку без обмеження часу.",
             );
-            this.tracking = false;
           }
         }
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
@@ -765,49 +764,54 @@ class BotController {
       "Старт! Очікую появу кнопки “Купити”",
     );
 
-    let buyButton = null;
-    while (this.tracking && !buyButton) {
+    while (this.tracking) {
       const waitedChallenge = await this._waitChallengeIfVisible();
       if (waitedChallenge) {
         await sleep(80);
         continue;
       }
 
-      buyButton = await this._findBuyButton();
+      const buyButton = await this._findBuyButton();
       if (!buyButton) {
         await sleep(60);
+        continue;
       }
-    }
-    if (!this.tracking) return;
 
-    this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
-    const before = await this._getCartCount();
-    await this._clickDetectedBuyButton(buyButton);
+      this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
+      const before = await this._getCartCount();
+      await this._clickDetectedBuyButton(buyButton);
 
-    const result = await this._waitAddedByCartCount(before, 6000);
-    if (result === "added") {
-      this._status(BOT_STATES.ADDED);
-      addedToCart = true;
-      this.tracking = false;
-      return;
-    } else if (result === "captcha") {
-      const retryResult = await this._waitCaptchaAndRetry(before);
-      if (retryResult === "added") {
+      const result = await this._waitAddedByCartCount(before, 6000);
+      if (result === "added") {
         this._status(BOT_STATES.ADDED);
-      } else if (retryResult === "unknown") {
+        addedToCart = true;
+        this.tracking = false;
+        return;
+      } else if (result === "captcha") {
+        const retryResult = await this._waitCaptchaAndRetry(before);
+        if (retryResult === "added") {
+          this._status(BOT_STATES.ADDED);
+          this.tracking = false;
+          return;
+        }
+
         this._status(
-          BOT_STATES.ERROR,
-          "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+          BOT_STATES.WAIT_BUY,
+          "Після перевірки «Я людина» додавання не підтверджено. Продовжую чекати кнопку.",
         );
+        await sleep(120);
+        continue;
       }
-      this.tracking = false;
-      return;
-    } else {
+
       this._status(
-        BOT_STATES.ERROR,
-        "Не вдалося підтвердити додавання. Перевір кошик вручну.",
+        BOT_STATES.WAIT_BUY,
+        "Клік виконано, але додавання не підтверджено. Продовжую чекати кнопку без обмеження часу.",
       );
-      this.tracking = false;
+      await sleep(120);
+    }
+
+    if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
+      this._status(BOT_STATES.STOPPED);
     }
   }
   async softStop() {
@@ -1077,10 +1081,11 @@ class BotController {
 
     this.waitingCaptcha = false;
 
-    for (let attempt = 1; attempt <= 3 && this.tracking; attempt += 1) {
+    let attempt = 1;
+    while (this.tracking) {
       this._status(
         BOT_STATES.RETRY_AFTER_CAPTCHA,
-        `Спроба ${attempt}/3: повторно натискаю “Купити”`,
+        `Спроба ${attempt}: повторно натискаю “Купити”`,
       );
 
       await sleep(100 + Math.floor(Math.random() * 201));
@@ -1108,6 +1113,7 @@ class BotController {
 
         this.waitingCaptcha = false;
       }
+      attempt += 1;
     }
 
     return "unknown";
