@@ -1141,6 +1141,19 @@ class BotController {
     if (!this.page) return false;
 
     return this.page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
       const bodyText = (document.body?.innerText || "").toLowerCase();
       const challengeTextHints = [
         "cloudflare",
@@ -1160,11 +1173,12 @@ class BotController {
         "iframe[src*='captcha']",
         "div.g-recaptcha",
         "textarea[name='g-recaptcha-response']",
-        "[id*='challenge' i]",
-        "[class*='challenge' i]",
+        "[class*='cf-challenge' i]",
       ];
 
-      return selectors.some((selector) => !!document.querySelector(selector));
+      return selectors.some((selector) =>
+        [...document.querySelectorAll(selector)].some((el) => isVisible(el)),
+      );
     });
   }
 
@@ -1178,6 +1192,9 @@ class BotController {
     while (this.tracking && this.waitingCaptcha) {
       const visible = await this._isCaptchaStillVisible();
       if (!visible) break;
+
+      const buyButtonBack = await this._findBuyButton().catch(() => null);
+      if (buyButtonBack) break;
       await sleep(500);
     }
 
@@ -1198,6 +1215,19 @@ class BotController {
     if (!this.page) return false;
 
     return this.page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
       const bodyText = (document.body?.innerText || "").toLowerCase();
       if (bodyText.includes("капч")) return true;
       if (bodyText.includes("cloudflare")) return true;
@@ -1214,7 +1244,9 @@ class BotController {
         "img[alt*='captcha' i]",
       ];
 
-      return selectors.some((selector) => !!document.querySelector(selector));
+      return selectors.some((selector) =>
+        [...document.querySelectorAll(selector)].some((el) => isVisible(el)),
+      );
     });
   }
 
