@@ -158,6 +158,7 @@ class BotController {
     this.browserType = String(browserType || "chrome").toLowerCase();
     this.tracking = false;
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
   }
 
@@ -201,6 +202,16 @@ class BotController {
           const text = (node.innerText || node.textContent || "")
             .toLowerCase()
             .trim();
+          const semanticText = [
+            text,
+            node.getAttribute("aria-label") || "",
+            node.getAttribute("title") || "",
+            node.getAttribute("data-action") || "",
+            node.getAttribute("href") || "",
+            node.className || "",
+          ]
+            .join(" ")
+            .toLowerCase();
           const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
           const negativeHints = [
             "очіку",
@@ -209,6 +220,17 @@ class BotController {
             "немає в наявності",
             "sold out",
             "unavailable",
+          ];
+          const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+          const challengeHints = [
+            "я не робот",
+            "i am human",
+            "verify",
+            "cloudflare",
+            "challenge",
+            "captcha",
+            "recaptcha",
+            "turnstile",
           ];
 
           const visible =
@@ -231,6 +253,12 @@ class BotController {
 
           const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
           const looksNegative = negativeHints.some((hint) => text.includes(hint));
+          const looksLikeBuyAction = buyHints.some((hint) =>
+            semanticText.includes(hint),
+          );
+          const looksLikeCaptcha = challengeHints.some((hint) =>
+            semanticText.includes(hint),
+          );
 
           const cx = rect.left + rect.width / 2;
           const cy = rect.top + rect.height / 2;
@@ -238,7 +266,15 @@ class BotController {
           const notCovered =
             !topElement || topElement === node || node.contains(topElement);
 
-          return visible && enabled && !looksLikeInCart && !looksNegative && notCovered;
+          return (
+            visible &&
+            enabled &&
+            looksLikeBuyAction &&
+            !looksLikeInCart &&
+            !looksNegative &&
+            !looksLikeCaptcha &&
+            notCovered
+          );
         });
       } catch {
         return false;
@@ -262,31 +298,51 @@ class BotController {
         ...document.querySelectorAll("button, a, [role='button']"),
       ];
 
-      const byText = candidates.find((el) => {
-        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
-        const style = window.getComputedStyle(el);
-        const rect = el.getBoundingClientRect();
-        const visible =
-          style.display !== "none" &&
-          style.visibility !== "hidden" &&
+        const byText = candidates.find((el) => {
+          const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+          const semanticText = [
+            t,
+            el.getAttribute("aria-label") || "",
+            el.getAttribute("title") || "",
+            el.getAttribute("data-action") || "",
+            el.getAttribute("href") || "",
+            el.className || "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
           Number(style.opacity || 1) > 0 &&
           rect.width > 0 &&
           rect.height > 0;
         const enabled =
           !el.hasAttribute("disabled") &&
           el.getAttribute("aria-disabled") !== "true";
-        const looksLikeInCart =
-          t.includes("у кошику") ||
-          t.includes("в кошику") ||
-          t.includes("перейти до кошика");
+          const looksLikeInCart =
+            t.includes("у кошику") ||
+            t.includes("в кошику") ||
+            t.includes("перейти до кошика");
+          const looksLikeCaptcha =
+            semanticText.includes("я не робот") ||
+            semanticText.includes("i am human") ||
+            semanticText.includes("verify") ||
+            semanticText.includes("cloudflare") ||
+            semanticText.includes("challenge") ||
+            semanticText.includes("captcha") ||
+            semanticText.includes("recaptcha") ||
+            semanticText.includes("turnstile");
 
-        return (
-          visible &&
-          enabled &&
-          !looksLikeInCart &&
-          (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
-        );
-      });
+          return (
+            visible &&
+            enabled &&
+            !looksLikeInCart &&
+            !looksLikeCaptcha &&
+            (t.includes("купити") || t.includes("в кошик") || t.includes("buy"))
+          );
+        });
 
       if (byText) return byText;
 
@@ -523,7 +579,8 @@ class BotController {
     );
     await sleep(30);
 
-    await this._clickWithQuickRetries(btn, 3);
+    await this._applyPostChallengeCooldown();
+    await this._clickWithQuickRetries(btn, 1);
 
     const clickSentAt = Date.now();
     console.log(
@@ -534,19 +591,67 @@ class BotController {
   async _clickDetectedBuyButton(btn) {
     if (!btn) throw new Error('Кнопку "Купити" не знайдено');
 
+    const safeToClick = await btn
+      .evaluate((el) => {
+        const semanticText = [
+          el.innerText || el.textContent || "",
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+          el.getAttribute("href") || "",
+          el.className || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+
+        const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+        const challengeHints = [
+          "я не робот",
+          "i am human",
+          "verify",
+          "cloudflare",
+          "challenge",
+          "captcha",
+          "recaptcha",
+          "turnstile",
+        ];
+
+        return (
+          buyHints.some((hint) => semanticText.includes(hint)) &&
+          !challengeHints.some((hint) => semanticText.includes(hint))
+        );
+      })
+      .catch(() => false);
+
+    if (!safeToClick) {
+      throw new Error(
+        'Знайдений елемент не схожий на кнопку "Купити" (можлива перевірка "Я не робот").',
+      );
+    }
+
     try {
       await btn.evaluate((el) =>
         el.scrollIntoView({ block: "center", inline: "center" }),
       );
     } catch {}
 
-    await this._clickWithQuickRetries(btn, 3);
+    await this._applyPostChallengeCooldown();
+    await this._clickWithQuickRetries(btn, 1);
+  }
+
+  async _applyPostChallengeCooldown() {
+    const minHumanPauseMs = 0;
+    const elapsed = Date.now() - Number(this.lastChallengeResolvedAt || 0);
+    if (elapsed < minHumanPauseMs) {
+      await sleep(minHumanPauseMs - elapsed);
+    }
   }
 
   async _clickWithQuickRetries(btn, maxAttempts = 3) {
+    const attempts = Math.max(1, Number(maxAttempts) || 1);
     let lastError = null;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
       try {
         await btn.click({ delay: 10 });
         return;
@@ -570,7 +675,7 @@ class BotController {
         lastError = err;
       }
 
-      if (attempt < maxAttempts) {
+      if (attempt < attempts) {
         await sleep(randomBetween(100, 300));
       }
     }
@@ -654,6 +759,7 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = Date.now();
     if (this.tracking) this._status(BOT_STATES.WAIT_BUY);
     return true;
   }
@@ -1034,8 +1140,30 @@ class BotController {
   async _isCaptchaStillVisible() {
     if (!this.page) return false;
 
+    const currentUrl = this.page.url?.() || "";
+    if (
+      currentUrl.includes("/cdn-cgi/challenge-platform") ||
+      currentUrl.includes("challenges.cloudflare.com")
+    ) {
+      return true;
+    }
+
     return this.page.evaluate(() => {
+      const isVisible = (el) => {
+        if (!el) return false;
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0 &&
+          rect.width > 0 &&
+          rect.height > 0
+        );
+      };
+
       const bodyText = (document.body?.innerText || "").toLowerCase();
+      const titleText = (document.title || "").toLowerCase();
       const challengeTextHints = [
         "cloudflare",
         "підтвердіть, що ви людина",
@@ -1044,21 +1172,27 @@ class BotController {
         "перевірка безпеки",
       ];
 
-      if (challengeTextHints.some((hint) => bodyText.includes(hint))) {
+      if (
+        challengeTextHints.some(
+          (hint) => bodyText.includes(hint) || titleText.includes(hint),
+        )
+      ) {
         return true;
       }
 
       const selectors = [
         "iframe[src*='challenges.cloudflare.com']",
+        "iframe[src*='turnstile' i]",
         "iframe[title*='challenge' i]",
         "iframe[src*='captcha']",
         "div.g-recaptcha",
         "textarea[name='g-recaptcha-response']",
-        "[id*='challenge' i]",
-        "[class*='challenge' i]",
+        "[class*='cf-challenge' i]",
       ];
 
-      return selectors.some((selector) => !!document.querySelector(selector));
+      return selectors.some((selector) =>
+        [...document.querySelectorAll(selector)].some((el) => isVisible(el)),
+      );
     });
   }
 
@@ -1066,12 +1200,15 @@ class BotController {
     this.waitingCaptcha = true;
     this._status(
       BOT_STATES.WAIT_CLOUDFLARE,
-      "Потрібно пройти «Я не робот» вручну. Автоклік тимчасово вимкнений, після проходження продовжу відстеження.",
+      "Потрібно пройти «Я не робот» вручну. Після одного кліку автодотискання вимкнено.",
     );
 
     while (this.tracking && this.waitingCaptcha) {
       const visible = await this._isCaptchaStillVisible();
       if (!visible) break;
+
+      const buyButtonBack = await this._findBuyButton().catch(() => null);
+      if (buyButtonBack) break;
       await sleep(500);
     }
 
@@ -1081,72 +1218,17 @@ class BotController {
     }
 
     this.waitingCaptcha = false;
+    this.lastChallengeResolvedAt = Date.now();
     this._status(
       BOT_STATES.WAIT_BUY,
-      "Перевірку пройдено. Пробую натиснути «Купити» автоматично.",
+      "Перевірку пройдено. Очікую кнопку «Купити» без повторних автокліків.",
     );
-
-    let attempt = 1;
-    while (this.tracking && attempt <= 5) {
-      this._status(
-        BOT_STATES.RETRY_AFTER_CAPTCHA,
-        `Спроба ${attempt}/5 після перевірки «Я не робот».`,
-      );
-
-      try {
-        await this._fastClick();
-      } catch (error) {
-        attempt += 1;
-        await sleep(180);
-        continue;
-      }
-
-      const result = await this._waitAddedByCartCount(_beforeCount, 4000);
-      if (result === "added") return "added";
-      if (result === "captcha") {
-        this.waitingCaptcha = true;
-        this._status(
-          BOT_STATES.WAIT_CLOUDFLARE,
-          "Challenge зʼявився знову. Пройди вручну, потім продовжу автоклік.",
-        );
-
-        while (this.tracking && this.waitingCaptcha) {
-          const visible = await this._isCaptchaStillVisible();
-          if (!visible) break;
-          await sleep(500);
-        }
-        this.waitingCaptcha = false;
-      }
-
-      attempt += 1;
-      await sleep(150);
-    }
-
     return "manual_done";
   }
 
   async _hasCaptcha() {
     if (!this.page) return false;
-
-    return this.page.evaluate(() => {
-      const bodyText = (document.body?.innerText || "").toLowerCase();
-      if (bodyText.includes("капч")) return true;
-      if (bodyText.includes("cloudflare")) return true;
-      if (bodyText.includes("verify you are human")) return true;
-      if (bodyText.includes("підтвердіть, що ви людина")) return true;
-
-      const selectors = [
-        "iframe[src*='challenges.cloudflare.com']",
-        "iframe[title*='challenge' i]",
-        "iframe[src*='captcha']",
-        "div.g-recaptcha",
-        "textarea[name='g-recaptcha-response']",
-        "input[name*='captcha']",
-        "img[alt*='captcha' i]",
-      ];
-
-      return selectors.some((selector) => !!document.querySelector(selector));
-    });
+    return this._isCaptchaStillVisible();
   }
 
   getState() {
