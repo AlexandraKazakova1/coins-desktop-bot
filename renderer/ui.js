@@ -4,7 +4,8 @@ const btnAuth = $("btnAuth");
 const btnArm = $("btnArm");
 const btnStop = $("btnStop");
 
-const urlInput = $("url");
+const urlsInput = $("urls");
+const tabsInput = $("tabs");
 const startAtInput = $("startAt");
 
 const dot = $("dot");
@@ -59,8 +60,9 @@ function maybePlayStatusSound(eventCode) {
 }
 
 function setDot(status) {
+  const normalizedStatus = String(status || "").replace(/^\[[^\]]+\]\s*/, "");
   dot.className = "dot";
-  const kind = STATUS_COLOR[status] || "idle";
+  const kind = STATUS_COLOR[normalizedStatus] || "idle";
 
   if (kind === "error") dot.classList.add("dot-red");
   else if (kind === "pending") dot.classList.add("dot-yellow");
@@ -79,7 +81,8 @@ btnAuth.onclick = async () => {
 btnArm.onclick = async () => {
   lastSoundEvent = "";
   const payload = {
-    url: urlInput.value.trim(),
+    urls: urlsInput.value.trim(),
+    tabs: tabsInput.value,
     startAtLocal: startAtInput.value || null,
   };
 
