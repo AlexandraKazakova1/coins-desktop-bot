@@ -113,14 +113,44 @@ function chromePaths() {
   ];
 }
 
+function operaPaths() {
+  return [
+    "C:\\\\Program Files\\\\Opera\\\\launcher.exe",
+    "C:\\\\Program Files (x86)\\\\Opera\\\\launcher.exe",
+    path.join(process.env.LOCALAPPDATA || "", "Programs\\Opera\\launcher.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs\\Opera\\opera.exe"),
+  ];
+}
+
+function firefoxPaths() {
+  return [
+    "C:\\\\Program Files\\\\Mozilla Firefox\\\\firefox.exe",
+    "C:\\\\Program Files (x86)\\\\Mozilla Firefox\\\\firefox.exe",
+    path.join(process.env.LOCALAPPDATA || "", "Mozilla Firefox\\firefox.exe"),
+  ];
+}
+
+function resolveBrowserExecutable(browserType) {
+  const normalized = String(browserType || "chrome").toLowerCase();
+  const candidates =
+    normalized === "opera"
+      ? operaPaths()
+      : normalized === "firefox"
+        ? firefoxPaths()
+        : chromePaths();
+
+  return candidates.find((candidatePath) => fs.existsSync(candidatePath));
+}
+
 class BotController {
-  constructor({ profileDir, onStatus, browser = null, page = null, ownsBrowser = true }) {
+  constructor({ profileDir, onStatus, browser = null, page = null, ownsBrowser = true, browserType = "chrome" }) {
     this.profileDir = profileDir;
     ensureDir(profileDir);
     this.onStatus = onStatus || (() => {});
     this.browser = browser;
     this.page = page;
     this.ownsBrowser = ownsBrowser;
+    this.browserType = String(browserType || "chrome").toLowerCase();
     this.tracking = false;
     this.waitingCaptcha = false;
     this.state = BOT_STATES.READY;
@@ -309,17 +339,26 @@ class BotController {
       }
     }
 
-    const chrome = chromePaths().find(fs.existsSync);
-    if (!chrome) throw new Error("Chrome не знайдено");
+    const executablePath = resolveBrowserExecutable(this.browserType);
+    if (!executablePath) {
+      throw new Error(`Браузер ${this.browserType} не знайдено на компʼютері`);
+    }
 
-    this.browser = await puppeteer.launch({
+    const launchOptions = {
       headless: false,
-      executablePath: chrome,
+      executablePath,
       userDataDir: this.profileDir,
       defaultViewport: null,
       protocolTimeout: 24000000,
       args: ["--start-maximized"],
-    });
+    };
+
+    if (this.browserType === "firefox") {
+      launchOptions.product = "firefox";
+      launchOptions.args = [];
+    }
+
+    this.browser = await puppeteer.launch(launchOptions);
 
     // якщо Chrome відвалиться — щоб не лишався “мертвий” browser в памʼяті
     this.browser.on("disconnected", () => {
