@@ -416,7 +416,12 @@ class BotController {
       userDataDir: this.profileDir,
       defaultViewport: null,
       protocolTimeout: 24000000,
-      args: ["--start-maximized"],
+      ignoreDefaultArgs: ["--enable-automation"],
+      args: [
+        "--start-maximized",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-infobars",
+      ],
     };
 
     const isNativeFirefox = String(executablePath)
@@ -424,6 +429,7 @@ class BotController {
       .includes("firefox.exe");
     if (this.browserType === "firefox" && isNativeFirefox) {
       launchOptions.product = "firefox";
+      launchOptions.ignoreDefaultArgs = undefined;
       launchOptions.args = [];
     }
 
