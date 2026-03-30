@@ -74,6 +74,14 @@ function createWindow() {
   });
 }
 
+
+function registerIpc(channel, handler) {
+  try {
+    ipcMain.removeHandler(channel);
+  } catch {}
+  ipcMain.handle(channel, handler);
+}
+
 function ensureAuthBot() {
   if (!authBot) {
     authBot = new BotController({
@@ -96,7 +104,7 @@ app.whenReady().then(() => {
   createWindow();
   ensureAuthBot();
 
-  ipcMain.handle("auth", async () => {
+  registerIpc("auth", async () => {
     try {
       const bot = ensureAuthBot();
       await bot.openAuth();
@@ -107,7 +115,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("addTab", async () => {
+  registerIpc("addTab", async () => {
     try {
       if (tabs.size >= 10) {
         throw new Error("Максимум 10 вкладок на один акаунт.");
@@ -145,7 +153,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("startTab", async (_event, payload) => {
+  registerIpc("startTab", async (_event, payload) => {
     try {
       const tabId = Number(payload?.tabId);
       const url = String(payload?.url || "").trim();
@@ -153,9 +161,6 @@ app.whenReady().then(() => {
 
       const tab = tabs.get(tabId);
       if (!tab?.bot) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
-
-      await prepareWorkersFromAuth();
-      const activeTab = tabs.get(tabId);
 
       activeTab.bot
         .arm({
@@ -170,7 +175,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("startAllTabs", async (_event, payload) => {
+  registerIpc("startAllTabs", async (_event, payload) => {
     try {
       const tabIds = Array.isArray(payload?.tabIds)
         ? payload.tabIds.map((id) => Number(id)).filter((id) => Number.isFinite(id))
@@ -202,7 +207,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("stopTab", async (_event, payload) => {
+  registerIpc("stopTab", async (_event, payload) => {
     try {
       const tabId = Number(payload?.tabId);
       const tab = tabs.get(tabId);
@@ -216,7 +221,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("stop", async () => {
+  registerIpc("stop", async () => {
     try {
       await stopAllTabs();
       await authBot?.softStop();
@@ -227,7 +232,7 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle("getStatus", async () => {
+  registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
