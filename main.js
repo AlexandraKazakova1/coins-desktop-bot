@@ -54,7 +54,7 @@ function cloneAuthProfile(workerProfileDir) {
     });
   } catch (e) {
     throw new Error(
-      "Не вдалося створити вкладку з поточної сесії. Натисни «Авторизація», увійди, закрий вікно авторизації і повтори.",
+      "Не вдалося створити вкладку з поточної сесії. Натисни «Авторизація», увійди, закрий вікно авторизації і повтори."
     );
   }
 }
@@ -150,11 +150,7 @@ app.whenReady().then(() => {
   createWindow();
   ensureAuthBot();
 
-app.whenReady().then(() => {
-  createWindow();
-  ensureAuthBot();
-
-  ipcMain.handle("auth", async (_, payload) => {
+  ipcMain.handle("auth", async () => {
     try {
       const bot = ensureAuthBot();
       await bot.openAuth();

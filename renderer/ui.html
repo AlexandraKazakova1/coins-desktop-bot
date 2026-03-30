@@ -9,14 +9,20 @@
   <body>
     <div class="wrap">
       <h1>CoinsBot</h1>
-
+<div class="status">
+          <div class="dot" id="dot"></div>
+          <div>
+            <div class="statusTitle" id="statusTitle">Готово</div>
+            <div class="statusDetail" id="statusDetail"></div>
+          </div>
+        </div>
       <div class="card">
-        <button id="btnAuth">1) Авторизація</button>
+        <button id="btnAuth">Авторизація</button>
         <button id="btnAddTab" class="secondary" disabled>
-          2) Додати вкладку на цей акаунт
+          Додати вкладку на цей акаунт
         </button>
         <button id="btnStartAll" class="secondary" disabled>
-          3) Запустити пошук у всіх вкладках
+          Запустити пошук у всіх вкладках
         </button>
 
         <label class="label">Дата і час старту (спільно для всіх, необовʼязково)</label>
@@ -28,13 +34,7 @@
         </div>
         <div id="tabsList" class="tabsList"></div>
 
-        <div class="status">
-          <div class="dot" id="dot"></div>
-          <div>
-            <div class="statusTitle" id="statusTitle">Готово</div>
-            <div class="statusDetail" id="statusDetail"></div>
-          </div>
-        </div>
+        
       </div>
     </div>
 
