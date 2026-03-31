@@ -98,6 +98,31 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randomBetween = (min, max) =>
   Math.floor(min + Math.random() * (max - min + 1));
 
+class SlidingWindowLimiter {
+  constructor({ maxInSecond, maxInMinute }) {
+    this.maxInSecond = Math.max(1, Number(maxInSecond) || 1);
+    this.maxInMinute = Math.max(this.maxInSecond, Number(maxInMinute) || 1);
+    this.hits = [];
+  }
+
+  canRun(now = Date.now()) {
+    this._cleanup(now);
+    const lastSecondHits = this.hits.filter((ts) => now - ts < 1000).length;
+    if (lastSecondHits >= this.maxInSecond) return false;
+    if (this.hits.length >= this.maxInMinute) return false;
+    return true;
+  }
+
+  mark(now = Date.now()) {
+    this._cleanup(now);
+    this.hits.push(now);
+  }
+
+  _cleanup(now) {
+    this.hits = this.hits.filter((ts) => now - ts < 60000);
+  }
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -173,6 +198,12 @@ class BotController {
     this.waitingCaptcha = false;
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
+    this.refreshLimiter = new SlidingWindowLimiter({
+      maxInSecond: 5,
+      maxInMinute: 50,
+    });
+    this.lastRefreshAt = 0;
+    this.refreshInFlight = false;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
@@ -806,6 +837,42 @@ class BotController {
     return true;
   }
 
+  async _maybeRefreshCoinPage() {
+    if (!this.page || this.refreshInFlight) return false;
+
+    const now = Date.now();
+    const timeSinceLastRefresh = now - Number(this.lastRefreshAt || 0);
+    const minRefreshIntervalMs = 1200;
+
+    if (timeSinceLastRefresh < minRefreshIntervalMs) return false;
+    if (!this.refreshLimiter.canRun(now)) return false;
+
+    const currentUrl = this.page.url?.() || "";
+    if (!currentUrl.includes("coins.bank.gov.ua")) return false;
+
+    // Після Cloudflare даємо “людську паузу”, щоб не зірвати сесію.
+    const challengeCooldownMs = 8000;
+    if (now - Number(this.lastChallengeResolvedAt || 0) < challengeCooldownMs) {
+      return false;
+    }
+
+    this.refreshInFlight = true;
+    this.refreshLimiter.mark(now);
+    this.lastRefreshAt = now;
+
+    try {
+      await this.page.reload({
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.refreshInFlight = false;
+    }
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -866,6 +933,7 @@ class BotController {
             );
           }
         }
+        await this._maybeRefreshCoinPage();
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
         await sleep(35);
       }
@@ -919,6 +987,7 @@ class BotController {
 
       const buyButton = await this._findBuyButton();
       if (!buyButton) {
+        await this._maybeRefreshCoinPage();
         await sleep(60);
         continue;
       }
