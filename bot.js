@@ -98,6 +98,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randomBetween = (min, max) =>
   Math.floor(min + Math.random() * (max - min + 1));
 
+function createSlidingWindowLimiter({ maxInSecond, maxInMinute }) {
+  const state = {
+    maxInSecond: Math.max(1, Number(maxInSecond) || 1),
+    maxInMinute: 1,
+    hits: [],
+  };
+
+  state.maxInMinute = Math.max(
+    state.maxInSecond,
+    Number(maxInMinute) || state.maxInSecond,
+  );
+
+  const cleanup = (now) => {
+    state.hits = state.hits.filter((ts) => now - ts < 60000);
+  };
+
+  return {
+    canRun(now = Date.now()) {
+      cleanup(now);
+      const lastSecondHits = state.hits.filter((ts) => now - ts < 1000).length;
+      if (lastSecondHits >= state.maxInSecond) return false;
+      if (state.hits.length >= state.maxInMinute) return false;
+      return true;
+    },
+    mark(now = Date.now()) {
+      cleanup(now);
+      state.hits.push(now);
+    },
+  };
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -173,7 +204,7 @@ class BotController {
     this.waitingCaptcha = false;
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
-    this.refreshLimiter = new SlidingWindowLimiter({
+    this.refreshLimiter = createSlidingWindowLimiter({
       maxInSecond: 5,
       maxInMinute: 50,
     });
@@ -893,6 +924,8 @@ class BotController {
             );
           }
         }
+        await this._maybeRefreshCoinPage();
+        // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
         await sleep(35);
       }
       if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
