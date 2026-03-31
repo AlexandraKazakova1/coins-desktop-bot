@@ -628,6 +628,39 @@ class BotController {
     }
   }
 
+  async _isExplicitlySignedOut() {
+    if (!this.page) return false;
+
+    try {
+      const currentUrl = (this.page.url?.() || "").toLowerCase();
+      const authUrlHints = ["/login", "/signin", "/auth", "cabinet/login"];
+      if (authUrlHints.some((hint) => currentUrl.includes(hint))) return true;
+
+      return await this.page.evaluate(() => {
+        const text = (document.body?.innerText || "").toLowerCase();
+        const signedOutHints = [
+          "увійти",
+          "вхід",
+          "авторизація",
+          "не авториз",
+          "будь ласка, увійдіть",
+          "sign in",
+          "log in",
+        ];
+        const signedInHints = ["вийти", "профіль", "кабінет", "мої замовлення"];
+
+        const hasSignedOutHint = signedOutHints.some((hint) =>
+          text.includes(hint),
+        );
+        const hasSignedInHint = signedInHints.some((hint) => text.includes(hint));
+
+        return hasSignedOutHint && !hasSignedInHint;
+      });
+    } catch {
+      return false;
+    }
+  }
+
   async _humanIdle() {
     if (!this.page) return;
 
@@ -859,6 +892,16 @@ class BotController {
     const currentUrl = this.page.url?.() || "";
     if (!currentUrl.includes("coins.bank.gov.ua")) return false;
 
+    const signedOut = await this._isExplicitlySignedOut();
+    if (signedOut) {
+      this._status(
+        BOT_STATES.AUTH,
+        "Схоже, сесія розлогінилась. Увійди знову та перезапусти відстеження.",
+      );
+      this.tracking = false;
+      return false;
+    }
+
     // Після Cloudflare даємо “людську паузу”, щоб не зірвати сесію.
     const challengeCooldownMs = 8000;
     if (now - Number(this.lastChallengeResolvedAt || 0) < challengeCooldownMs) {
@@ -980,6 +1023,16 @@ class BotController {
           continue;
         }
 
+        const signedOut = await this._isExplicitlySignedOut();
+        if (signedOut) {
+          this._status(
+            BOT_STATES.AUTH,
+            "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
+          );
+          this.tracking = false;
+          break;
+        }
+
         // чекаємо появу кнопки через DOM-сигнал + періодичний повний скан
         const buySignal = await this._waitForBuySignal(120);
         if (buySignal) this.lastBuySignalAt = Date.now();
@@ -1075,6 +1128,16 @@ class BotController {
       if (waitedChallenge) {
         await sleep(80);
         continue;
+      }
+
+      const signedOut = await this._isExplicitlySignedOut();
+      if (signedOut) {
+        this._status(
+          BOT_STATES.AUTH,
+          "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
+        );
+        this.tracking = false;
+        break;
       }
 
       const buySignal = await this._waitForBuySignal(120);
