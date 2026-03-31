@@ -212,12 +212,15 @@ class BotController {
     this.refreshInFlight = false;
     this.waitBuySince = 0;
     this.refreshAttemptsWithoutButton = 0;
+    this.domProbeTick = 0;
+    this.lastBuySignalAt = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
     if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
     if (state === BOT_STATES.WAIT_BUY && this.state !== BOT_STATES.WAIT_BUY) {
       this.waitBuySince = Date.now();
+      this.lastBuySignalAt = Date.now();
     }
 
     const message = STATUS_MAP[state] || { title: state, detail: "" };
@@ -880,6 +883,79 @@ class BotController {
     }
   }
 
+  async _waitForBuySignal(timeoutMs = 120) {
+    if (!this.page) return false;
+
+    try {
+      return await this.page.evaluate((timeout) => {
+        const hasBuyCandidate = () => {
+          const controls = [
+            ...document.querySelectorAll("button, a, [role='button']"),
+          ];
+          const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+          const negativeHints = [
+            "очіку",
+            "незабаром",
+            "розпродано",
+            "немає в наявності",
+            "sold out",
+            "unavailable",
+          ];
+
+          return controls.some((el) => {
+            const text = (el.innerText || el.textContent || "").toLowerCase();
+            if (!buyHints.some((hint) => text.includes(hint))) return false;
+            if (inCartHints.some((hint) => text.includes(hint))) return false;
+            if (negativeHints.some((hint) => text.includes(hint))) return false;
+
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            const visible =
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity || 1) > 0 &&
+              rect.width > 0 &&
+              rect.height > 0;
+            const enabled =
+              !el.hasAttribute("disabled") &&
+              el.getAttribute("aria-disabled") !== "true";
+            return visible && enabled;
+          });
+        };
+
+        if (hasBuyCandidate()) return Promise.resolve(true);
+
+        return new Promise((resolve) => {
+          let doneCalled = false;
+          let timer = null;
+          const done = (result) => {
+            if (doneCalled) return;
+            doneCalled = true;
+            if (observer) observer.disconnect();
+            if (timer) clearTimeout(timer);
+            resolve(result);
+          };
+
+          const observer = new MutationObserver(() => {
+            if (hasBuyCandidate()) done(true);
+          });
+
+          timer = setTimeout(() => done(false), Math.max(30, timeout));
+          observer.observe(document.documentElement || document.body, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            characterData: true,
+            attributeFilter: ["class", "style", "disabled", "aria-disabled"],
+          });
+        });
+      }, timeoutMs);
+    } catch {
+      return false;
+    }
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -904,9 +980,16 @@ class BotController {
           continue;
         }
 
-        const btn = await this._findBuyButton();
+        // чекаємо появу кнопки через DOM-сигнал + періодичний повний скан
+        const buySignal = await this._waitForBuySignal(120);
+        if (buySignal) this.lastBuySignalAt = Date.now();
+        const shouldScanNow = buySignal || this.domProbeTick % 3 === 0;
+        const btn = shouldScanNow ? await this._findBuyButton() : null;
+        this.domProbeTick += 1;
         if (btn) {
           this.refreshAttemptsWithoutButton = 0;
+          this.domProbeTick = 0;
+          this.lastBuySignalAt = Date.now();
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
@@ -939,7 +1022,10 @@ class BotController {
             );
           }
         }
-        await this._maybeRefreshCoinPage();
+        const staleSignalMs = Date.now() - Number(this.lastBuySignalAt || 0);
+        if (staleSignalMs > 6000) {
+          await this._maybeRefreshCoinPage();
+        }
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
         await sleep(35);
       }
@@ -991,13 +1077,22 @@ class BotController {
         continue;
       }
 
-      const buyButton = await this._findBuyButton();
+      const buySignal = await this._waitForBuySignal(120);
+      if (buySignal) this.lastBuySignalAt = Date.now();
+      const shouldScanNow = buySignal || this.domProbeTick % 3 === 0;
+      const buyButton = shouldScanNow ? await this._findBuyButton() : null;
+      this.domProbeTick += 1;
       if (!buyButton) {
-        await this._maybeRefreshCoinPage();
+        const staleSignalMs = Date.now() - Number(this.lastBuySignalAt || 0);
+        if (staleSignalMs > 6000) {
+          await this._maybeRefreshCoinPage();
+        }
         await sleep(60);
         continue;
       }
       this.refreshAttemptsWithoutButton = 0;
+      this.domProbeTick = 0;
+      this.lastBuySignalAt = Date.now();
 
       this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
       const before = await this._getCartCount();
