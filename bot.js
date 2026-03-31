@@ -98,6 +98,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randomBetween = (min, max) =>
   Math.floor(min + Math.random() * (max - min + 1));
 
+function createSlidingWindowLimiter({ maxInSecond, maxInMinute }) {
+  const state = {
+    maxInSecond: Math.max(1, Number(maxInSecond) || 1),
+    maxInMinute: 1,
+    hits: [],
+  };
+
+  state.maxInMinute = Math.max(
+    state.maxInSecond,
+    Number(maxInMinute) || state.maxInSecond,
+  );
+
+  const cleanup = (now) => {
+    state.hits = state.hits.filter((ts) => now - ts < 60000);
+  };
+
+  return {
+    canRun(now = Date.now()) {
+      cleanup(now);
+      const lastSecondHits = state.hits.filter((ts) => now - ts < 1000).length;
+      if (lastSecondHits >= state.maxInSecond) return false;
+      if (state.hits.length >= state.maxInMinute) return false;
+      return true;
+    },
+    mark(now = Date.now()) {
+      cleanup(now);
+      state.hits.push(now);
+    },
+  };
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -173,10 +204,24 @@ class BotController {
     this.waitingCaptcha = false;
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
+    this.refreshLimiter = createSlidingWindowLimiter({
+      maxInSecond: 1,
+      maxInMinute: 8,
+    });
+    this.lastRefreshAt = 0;
+    this.refreshInFlight = false;
+    this.waitBuySince = 0;
+    this.refreshAttemptsWithoutButton = 0;
+    this.domProbeTick = 0;
+    this.lastBuySignalAt = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
     if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
+    if (state === BOT_STATES.WAIT_BUY && this.state !== BOT_STATES.WAIT_BUY) {
+      this.waitBuySince = Date.now();
+      this.lastBuySignalAt = Date.now();
+    }
 
     const message = STATUS_MAP[state] || { title: state, detail: "" };
     const detail = detailOverride || message.detail || "";
@@ -579,6 +624,39 @@ class BotController {
     }
   }
 
+  async _isExplicitlySignedOut() {
+    if (!this.page) return false;
+
+    try {
+      const currentUrl = (this.page.url?.() || "").toLowerCase();
+      const authUrlHints = ["/login", "/signin", "/auth", "cabinet/login"];
+      if (authUrlHints.some((hint) => currentUrl.includes(hint))) return true;
+
+      return await this.page.evaluate(() => {
+        const text = (document.body?.innerText || "").toLowerCase();
+        const signedOutHints = [
+          "увійти",
+          "вхід",
+          "авторизація",
+          "не авториз",
+          "будь ласка, увійдіть",
+          "sign in",
+          "log in",
+        ];
+        const signedInHints = ["вийти", "профіль", "кабінет", "мої замовлення"];
+
+        const hasSignedOutHint = signedOutHints.some((hint) =>
+          text.includes(hint),
+        );
+        const hasSignedInHint = signedInHints.some((hint) => text.includes(hint));
+
+        return hasSignedOutHint && !hasSignedInHint;
+      });
+    } catch {
+      return false;
+    }
+  }
+
   async _humanIdle() {
     if (!this.page) return;
 
@@ -806,6 +884,134 @@ class BotController {
     return true;
   }
 
+  async _maybeRefreshCoinPage() {
+    if (!this.page || this.refreshInFlight) return false;
+
+    const now = Date.now();
+    const waitInBuyStateMs = now - Number(this.waitBuySince || 0);
+    const minWaitBeforeFirstRefreshMs = 15000;
+    if (waitInBuyStateMs < minWaitBeforeFirstRefreshMs) return false;
+
+    const timeSinceLastRefresh = now - Number(this.lastRefreshAt || 0);
+    const adaptiveBackoffMs = Math.min(
+      45000,
+      10000 + this.refreshAttemptsWithoutButton * 2500,
+    );
+    const minRefreshIntervalMs = adaptiveBackoffMs + randomBetween(250, 1600);
+
+    if (timeSinceLastRefresh < minRefreshIntervalMs) return false;
+    if (!this.refreshLimiter.canRun(now)) return false;
+
+    const currentUrl = this.page.url?.() || "";
+    if (!currentUrl.includes("coins.bank.gov.ua")) return false;
+
+    const signedOut = await this._isExplicitlySignedOut();
+    if (signedOut) {
+      this._status(
+        BOT_STATES.AUTH,
+        "Схоже, сесія розлогінилась. Увійди знову та перезапусти відстеження.",
+      );
+      this.tracking = false;
+      return false;
+    }
+
+    // Після Cloudflare даємо “людську паузу”, щоб не зірвати сесію.
+    const challengeCooldownMs = 8000;
+    if (now - Number(this.lastChallengeResolvedAt || 0) < challengeCooldownMs) {
+      return false;
+    }
+
+    this.refreshInFlight = true;
+    this.refreshLimiter.mark(now);
+    this.lastRefreshAt = now;
+
+    try {
+      await this.page.reload({
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      });
+      this.refreshAttemptsWithoutButton += 1;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.refreshInFlight = false;
+    }
+  }
+
+  async _waitForBuySignal(timeoutMs = 120) {
+    if (!this.page) return false;
+
+    try {
+      return await this.page.evaluate((timeout) => {
+        const hasBuyCandidate = () => {
+          const controls = [
+            ...document.querySelectorAll("button, a, [role='button']"),
+          ];
+          const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+          const negativeHints = [
+            "очіку",
+            "незабаром",
+            "розпродано",
+            "немає в наявності",
+            "sold out",
+            "unavailable",
+          ];
+
+          return controls.some((el) => {
+            const text = (el.innerText || el.textContent || "").toLowerCase();
+            if (!buyHints.some((hint) => text.includes(hint))) return false;
+            if (inCartHints.some((hint) => text.includes(hint))) return false;
+            if (negativeHints.some((hint) => text.includes(hint))) return false;
+
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            const visible =
+              style.display !== "none" &&
+              style.visibility !== "hidden" &&
+              Number(style.opacity || 1) > 0 &&
+              rect.width > 0 &&
+              rect.height > 0;
+            const enabled =
+              !el.hasAttribute("disabled") &&
+              el.getAttribute("aria-disabled") !== "true";
+            return visible && enabled;
+          });
+        };
+
+        if (hasBuyCandidate()) return Promise.resolve(true);
+
+        return new Promise((resolve) => {
+          let doneCalled = false;
+          let timer = null;
+          const done = (result) => {
+            if (doneCalled) return;
+            doneCalled = true;
+            if (observer) observer.disconnect();
+            if (timer) clearTimeout(timer);
+            resolve(result);
+          };
+
+          const observer = new MutationObserver(() => {
+            if (hasBuyCandidate()) done(true);
+          });
+
+          timer = setTimeout(() => done(false), Math.max(30, timeout));
+          observer.observe(document.documentElement || document.body, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            characterData: true,
+            attributeFilter: ["class", "style", "disabled", "aria-disabled"],
+          });
+        });
+      }, timeoutMs);
+    } catch {
+      return false;
+    }
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -831,9 +1037,26 @@ class BotController {
           continue;
         }
 
-        // чекаємо появу кнопки
-        const btn = await this._findBuyButton();
+        const signedOut = await this._isExplicitlySignedOut();
+        if (signedOut) {
+          this._status(
+            BOT_STATES.AUTH,
+            "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
+          );
+          this.tracking = false;
+          break;
+        }
+
+        // чекаємо появу кнопки через DOM-сигнал + періодичний повний скан
+        const buySignal = await this._waitForBuySignal(120);
+        if (buySignal) this.lastBuySignalAt = Date.now();
+        const shouldScanNow = buySignal || this.domProbeTick % 3 === 0;
+        const btn = shouldScanNow ? await this._findBuyButton() : null;
+        this.domProbeTick += 1;
         if (btn) {
+          this.refreshAttemptsWithoutButton = 0;
+          this.domProbeTick = 0;
+          this.lastBuySignalAt = Date.now();
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
@@ -865,6 +1088,10 @@ class BotController {
               "Клік виконано, але додавання не підтверджено. Продовжую чекати кнопку без обмеження часу.",
             );
           }
+        }
+        const staleSignalMs = Date.now() - Number(this.lastBuySignalAt || 0);
+        if (staleSignalMs > 6000) {
+          await this._maybeRefreshCoinPage();
         }
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
         await sleep(35);
@@ -917,11 +1144,32 @@ class BotController {
         continue;
       }
 
-      const buyButton = await this._findBuyButton();
+      const signedOut = await this._isExplicitlySignedOut();
+      if (signedOut) {
+        this._status(
+          BOT_STATES.AUTH,
+          "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
+        );
+        this.tracking = false;
+        break;
+      }
+
+      const buySignal = await this._waitForBuySignal(120);
+      if (buySignal) this.lastBuySignalAt = Date.now();
+      const shouldScanNow = buySignal || this.domProbeTick % 3 === 0;
+      const buyButton = shouldScanNow ? await this._findBuyButton() : null;
+      this.domProbeTick += 1;
       if (!buyButton) {
+        const staleSignalMs = Date.now() - Number(this.lastBuySignalAt || 0);
+        if (staleSignalMs > 6000) {
+          await this._maybeRefreshCoinPage();
+        }
         await sleep(60);
         continue;
       }
+      this.refreshAttemptsWithoutButton = 0;
+      this.domProbeTick = 0;
+      this.lastBuySignalAt = Date.now();
 
       this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
       const before = await this._getCartCount();
