@@ -98,6 +98,37 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const randomBetween = (min, max) =>
   Math.floor(min + Math.random() * (max - min + 1));
 
+function createSlidingWindowLimiter({ maxInSecond, maxInMinute }) {
+  const state = {
+    maxInSecond: Math.max(1, Number(maxInSecond) || 1),
+    maxInMinute: 1,
+    hits: [],
+  };
+
+  state.maxInMinute = Math.max(
+    state.maxInSecond,
+    Number(maxInMinute) || state.maxInSecond,
+  );
+
+  const cleanup = (now) => {
+    state.hits = state.hits.filter((ts) => now - ts < 60000);
+  };
+
+  return {
+    canRun(now = Date.now()) {
+      cleanup(now);
+      const lastSecondHits = state.hits.filter((ts) => now - ts < 1000).length;
+      if (lastSecondHits >= state.maxInSecond) return false;
+      if (state.hits.length >= state.maxInMinute) return false;
+      return true;
+    },
+    mark(now = Date.now()) {
+      cleanup(now);
+      state.hits.push(now);
+    },
+  };
+}
+
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -173,10 +204,21 @@ class BotController {
     this.waitingCaptcha = false;
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
+    this.refreshLimiter = createSlidingWindowLimiter({
+      maxInSecond: 1,
+      maxInMinute: 8,
+    });
+    this.lastRefreshAt = 0;
+    this.refreshInFlight = false;
+    this.waitBuySince = 0;
+    this.refreshAttemptsWithoutButton = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
     if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
+    if (state === BOT_STATES.WAIT_BUY && this.state !== BOT_STATES.WAIT_BUY) {
+      this.waitBuySince = Date.now();
+    }
 
     const message = STATUS_MAP[state] || { title: state, detail: "" };
     const detail = detailOverride || message.detail || "";
@@ -806,6 +848,51 @@ class BotController {
     return true;
   }
 
+  async _maybeRefreshCoinPage() {
+    if (!this.page || this.refreshInFlight) return false;
+
+    const now = Date.now();
+    const waitInBuyStateMs = now - Number(this.waitBuySince || 0);
+    const minWaitBeforeFirstRefreshMs = 15000;
+    if (waitInBuyStateMs < minWaitBeforeFirstRefreshMs) return false;
+
+    const timeSinceLastRefresh = now - Number(this.lastRefreshAt || 0);
+    const adaptiveBackoffMs = Math.min(
+      45000,
+      10000 + this.refreshAttemptsWithoutButton * 2500,
+    );
+    const minRefreshIntervalMs = adaptiveBackoffMs + randomBetween(250, 1600);
+
+    if (timeSinceLastRefresh < minRefreshIntervalMs) return false;
+    if (!this.refreshLimiter.canRun(now)) return false;
+
+    const currentUrl = this.page.url?.() || "";
+    if (!currentUrl.includes("coins.bank.gov.ua")) return false;
+
+    // Після Cloudflare даємо “людську паузу”, щоб не зірвати сесію.
+    const challengeCooldownMs = 8000;
+    if (now - Number(this.lastChallengeResolvedAt || 0) < challengeCooldownMs) {
+      return false;
+    }
+
+    this.refreshInFlight = true;
+    this.refreshLimiter.mark(now);
+    this.lastRefreshAt = now;
+
+    try {
+      await this.page.reload({
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      });
+      this.refreshAttemptsWithoutButton += 1;
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.refreshInFlight = false;
+    }
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -834,6 +921,7 @@ class BotController {
         // чекаємо появу кнопки
         const btn = await this._findBuyButton();
         if (btn) {
+          this.refreshAttemptsWithoutButton = 0;
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
@@ -866,6 +954,7 @@ class BotController {
             );
           }
         }
+        await this._maybeRefreshCoinPage();
         // Standby-режим: максимально щільне опитування кнопки для миттєвого кліку
         await sleep(35);
       }
@@ -919,9 +1008,11 @@ class BotController {
 
       const buyButton = await this._findBuyButton();
       if (!buyButton) {
+        await this._maybeRefreshCoinPage();
         await sleep(60);
         continue;
       }
+      this.refreshAttemptsWithoutButton = 0;
 
       this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
       const before = await this._getCartCount();
