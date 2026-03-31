@@ -205,15 +205,20 @@ class BotController {
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
     this.refreshLimiter = createSlidingWindowLimiter({
-      maxInSecond: 5,
-      maxInMinute: 50,
+      maxInSecond: 1,
+      maxInMinute: 8,
     });
     this.lastRefreshAt = 0;
     this.refreshInFlight = false;
+    this.waitBuySince = 0;
+    this.refreshAttemptsWithoutButton = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
     if (this.state === BOT_STATES.ADDED && state === BOT_STATES.STOPPED) return;
+    if (state === BOT_STATES.WAIT_BUY && this.state !== BOT_STATES.WAIT_BUY) {
+      this.waitBuySince = Date.now();
+    }
 
     const message = STATUS_MAP[state] || { title: state, detail: "" };
     const detail = detailOverride || message.detail || "";
@@ -834,8 +839,16 @@ class BotController {
     if (!this.page || this.refreshInFlight) return false;
 
     const now = Date.now();
+    const waitInBuyStateMs = now - Number(this.waitBuySince || 0);
+    const minWaitBeforeFirstRefreshMs = 15000;
+    if (waitInBuyStateMs < minWaitBeforeFirstRefreshMs) return false;
+
     const timeSinceLastRefresh = now - Number(this.lastRefreshAt || 0);
-    const minRefreshIntervalMs = 1200;
+    const adaptiveBackoffMs = Math.min(
+      45000,
+      10000 + this.refreshAttemptsWithoutButton * 2500,
+    );
+    const minRefreshIntervalMs = adaptiveBackoffMs + randomBetween(250, 1600);
 
     if (timeSinceLastRefresh < minRefreshIntervalMs) return false;
     if (!this.refreshLimiter.canRun(now)) return false;
@@ -858,6 +871,7 @@ class BotController {
         waitUntil: "domcontentloaded",
         timeout: 20000,
       });
+      this.refreshAttemptsWithoutButton += 1;
       return true;
     } catch {
       return false;
@@ -892,6 +906,7 @@ class BotController {
 
         const btn = await this._findBuyButton();
         if (btn) {
+          this.refreshAttemptsWithoutButton = 0;
           this._status(BOT_STATES.TRY_ADD);
 
           const before = await this._getCartCount();
@@ -982,6 +997,7 @@ class BotController {
         await sleep(60);
         continue;
       }
+      this.refreshAttemptsWithoutButton = 0;
 
       this._status(BOT_STATES.TRY_ADD, "Кнопка зʼявилась. Клікаю");
       const before = await this._getCartCount();
