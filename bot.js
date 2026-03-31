@@ -317,8 +317,12 @@ class BotController {
               .toLowerCase()
               .includes("inactive");
 
-          const looksLikeInCart = inCartHints.some((hint) => text.includes(hint));
-          const looksNegative = negativeHints.some((hint) => text.includes(hint));
+          const looksLikeInCart = inCartHints.some((hint) =>
+            text.includes(hint),
+          );
+          const looksNegative = negativeHints.some((hint) =>
+            text.includes(hint),
+          );
           const looksLikeBuyAction = buyHints.some((hint) =>
             actionText.includes(hint),
           );
@@ -364,61 +368,61 @@ class BotController {
         ...document.querySelectorAll("button, a, [role='button']"),
       ];
 
-        const byText = candidates.find((el) => {
-          const t = (el.innerText || el.textContent || "").toLowerCase().trim();
-          const semanticText = [
-            t,
-            el.getAttribute("aria-label") || "",
-            el.getAttribute("title") || "",
-            el.getAttribute("data-action") || "",
-            el.getAttribute("href") || "",
-            el.className || "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          const actionText = [
-            t,
-            el.getAttribute("aria-label") || "",
-            el.getAttribute("title") || "",
-            el.getAttribute("data-action") || "",
-          ]
-            .join(" ")
-            .toLowerCase();
-          const style = window.getComputedStyle(el);
-          const rect = el.getBoundingClientRect();
-          const visible =
-            style.display !== "none" &&
-            style.visibility !== "hidden" &&
+      const byText = candidates.find((el) => {
+        const t = (el.innerText || el.textContent || "").toLowerCase().trim();
+        const semanticText = [
+          t,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+          el.getAttribute("href") || "",
+          el.className || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        const actionText = [
+          t,
+          el.getAttribute("aria-label") || "",
+          el.getAttribute("title") || "",
+          el.getAttribute("data-action") || "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        const visible =
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
           Number(style.opacity || 1) > 0 &&
           rect.width > 0 &&
           rect.height > 0;
         const enabled =
           !el.hasAttribute("disabled") &&
           el.getAttribute("aria-disabled") !== "true";
-          const looksLikeInCart =
-            t.includes("у кошику") ||
-            t.includes("в кошику") ||
-            t.includes("перейти до кошика");
-          const looksLikeCaptcha =
-            semanticText.includes("я не робот") ||
-            semanticText.includes("i am human") ||
-            semanticText.includes("verify") ||
-            semanticText.includes("cloudflare") ||
-            semanticText.includes("challenge") ||
-            semanticText.includes("captcha") ||
-            semanticText.includes("recaptcha") ||
-            semanticText.includes("turnstile");
+        const looksLikeInCart =
+          t.includes("у кошику") ||
+          t.includes("в кошику") ||
+          t.includes("перейти до кошика");
+        const looksLikeCaptcha =
+          semanticText.includes("я не робот") ||
+          semanticText.includes("i am human") ||
+          semanticText.includes("verify") ||
+          semanticText.includes("cloudflare") ||
+          semanticText.includes("challenge") ||
+          semanticText.includes("captcha") ||
+          semanticText.includes("recaptcha") ||
+          semanticText.includes("turnstile");
 
-          return (
-            visible &&
-            enabled &&
-            !looksLikeInCart &&
-            !looksLikeCaptcha &&
-            (actionText.includes("купити") ||
-              actionText.includes("в кошик") ||
-              actionText.includes("buy"))
-          );
-        });
+        return (
+          visible &&
+          enabled &&
+          !looksLikeInCart &&
+          !looksLikeCaptcha &&
+          (actionText.includes("купити") ||
+            actionText.includes("в кошик") ||
+            actionText.includes("buy"))
+        );
+      });
 
       if (byText) return byText;
 
@@ -660,13 +664,11 @@ class BotController {
   async _humanIdle() {
     if (!this.page) return;
 
-    // 60% часу — взагалі нічого не робимо
     if (Math.random() < 0.6) {
       await sleep(300 + Math.random() * 600);
       return;
     }
 
-    // маленький “людський” скрол
     const direction = Math.random() < 0.7 ? 1 : -1; // частіше вниз
     const delta = direction * (80 + Math.random() * 140); // 80–220px
 
@@ -807,35 +809,20 @@ class BotController {
     throw new Error(friendly);
   }
 
-  // async _waitAdded(timeout = 3000) {
-  //   const t0 = Date.now();
-  //   while (Date.now() - t0 < timeout) {
-  //     const ok = await this.page.evaluate(() =>
-  //       document.body.innerText.toLowerCase().includes("додано"),
-  //     );
-  //     if (ok) return true;
-  //     await sleep(80);
-  //   }
-  //   return false;
-  // }
   async _ensurePage() {
     await this._browser();
 
-    // Якщо page не існує або закрита — створюємо нову
     if (!this.page || this.page.isClosed?.() === true) {
       if (!this.browser) throw new Error("Browser не ініціалізовано");
       this.page = await this.browser.newPage();
 
-      // (опційно) базові налаштування
       await this.page.setViewport({ width: 1280, height: 720 }).catch(() => {});
       this.page.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
     }
 
-    // bringToFront робимо “м’яко”
     try {
       if (this.page.bringToFront) await this.page.bringToFront();
     } catch (e) {
-      // якщо сесія закрита — не валимо весь процес, просто продовжуємо
       if (!String(e).includes("Session closed")) throw e;
     }
 
@@ -1020,7 +1007,6 @@ class BotController {
 
     await this._ensurePage();
 
-    // ====== РЕЖИМ БЕЗ ЧАСУ (STANDBY) ======
     if (!hasStartTime) {
       if (this.tracking)
         throw new Error("Відстеження вже запущено. Натисни 'Зупинити'.");
