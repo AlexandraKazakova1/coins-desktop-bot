@@ -173,6 +173,12 @@ class BotController {
     this.waitingCaptcha = false;
     this.lastChallengeResolvedAt = 0;
     this.state = BOT_STATES.READY;
+    this.refreshLimiter = new SlidingWindowLimiter({
+      maxInSecond: 5,
+      maxInMinute: 50,
+    });
+    this.lastRefreshAt = 0;
+    this.refreshInFlight = false;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
@@ -793,6 +799,42 @@ class BotController {
     return true;
   }
 
+  async _maybeRefreshCoinPage() {
+    if (!this.page || this.refreshInFlight) return false;
+
+    const now = Date.now();
+    const timeSinceLastRefresh = now - Number(this.lastRefreshAt || 0);
+    const minRefreshIntervalMs = 1200;
+
+    if (timeSinceLastRefresh < minRefreshIntervalMs) return false;
+    if (!this.refreshLimiter.canRun(now)) return false;
+
+    const currentUrl = this.page.url?.() || "";
+    if (!currentUrl.includes("coins.bank.gov.ua")) return false;
+
+    // Після Cloudflare даємо “людську паузу”, щоб не зірвати сесію.
+    const challengeCooldownMs = 8000;
+    if (now - Number(this.lastChallengeResolvedAt || 0) < challengeCooldownMs) {
+      return false;
+    }
+
+    this.refreshInFlight = true;
+    this.refreshLimiter.mark(now);
+    this.lastRefreshAt = now;
+
+    try {
+      await this.page.reload({
+        waitUntil: "domcontentloaded",
+        timeout: 20000,
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      this.refreshInFlight = false;
+    }
+  }
+
   async arm({ url, startAtLocal, prewarmSeconds = 5 }) {
     if (!url) throw new Error("URL обовʼязковий");
     let addedToCart = false;
@@ -851,7 +893,6 @@ class BotController {
             );
           }
         }
-
         await sleep(35);
       }
       if ([BOT_STATES.WAIT_BUY, BOT_STATES.TRY_ADD].includes(this.state)) {
@@ -904,6 +945,7 @@ class BotController {
 
       const buyButton = await this._findBuyButton();
       if (!buyButton) {
+        await this._maybeRefreshCoinPage();
         await sleep(60);
         continue;
       }
