@@ -179,24 +179,6 @@ function registerIpc(channel, handler) {
   ipcMain.handle(channel, handler);
 }
 
-async function ensureBrowserSession(browserType) {
-  const normalizedType = BROWSER_TYPES.includes(browserType)
-    ? browserType
-    : "chrome";
-
-  const existing = browserSessions.get(normalizedType);
-  if (existing) return existing;
-
-  const sessionBot = new BotController({
-    profileDir: getAuthProfileDir(normalizedType),
-    browserType: normalizedType,
-    onStatus: (s, d, e) => sendStatus(`[${normalizedType}] ${s}`, d, e),
-  });
-
-  browserSessions.set(normalizedType, sessionBot);
-  return sessionBot;
-}
-
 async function ensureTabBot(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
@@ -252,11 +234,19 @@ async function handleAddTab(_event, payload) {
       );
     }
 
-    const sessionBot = await ensureBrowserSession(browserType);
-    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
-
     const tabId = nextTabId;
     nextTabId += 1;
+    let sessionBot = browserSessions.get(browserType);
+    if (!sessionBot) {
+      sessionBot = new BotController({
+        profileDir: getAuthProfileDir(browserType),
+        browserType,
+        onStatus: (s, d, e) => sendStatus(`[${browserType}] ${s}`, d, e),
+      });
+      browserSessions.set(browserType, sessionBot);
+    }
+
+    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const bot = new BotController({
       profileDir: getAuthProfileDir(browserType),
@@ -279,7 +269,7 @@ async function handleAddTab(_event, payload) {
     sendTabStatus(
       tabId,
       "Готово",
-      `${browserType}: вкладка ${nextIndex} відкрита. Авторизуйся в цьому браузері, відкрий монету та встав URL у форму.`,
+      `${browserType}: вкладка ${nextIndex} відкрита. Увійди в акаунт у цьому браузері, відкрий монету та встав URL у форму.`,
       "ready",
     );
 
@@ -376,20 +366,18 @@ app.whenReady().then(() => {
     }
   });
 
+  registerIpc("auth_v2", async () => {
+    return {
+      ok: false,
+      error:
+        "Канал auth_v2 більше не використовується. Натисни кнопку браузера (Chrome/Opera/Mozilla), щоб відкрити вікно авторизації.",
+    };
+  });
+
   registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
-        auth: authBot ? authBot.getState() : null,
-        tabs: [...tabs.values()].map((t) => ({
-          id: t.id,
-          browserType: t.browserType,
-          ...(t.bot ? t.bot.getState() : {}),
-        })),
-        auth: [...browserSessions.entries()].map(([browserType, bot]) => ({
-          browserType,
-          ...bot.getState(),
-        })),
         tabs: [...tabs.values()].map((t) => ({
           id: t.id,
           browserType: t.browserType,
