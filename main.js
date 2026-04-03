@@ -225,9 +225,8 @@ async function handleAddTab(_event, payload) {
 
     const tabId = nextTabId;
     nextTabId += 1;
-    const workerProfileDir = getWorkerProfileDir(tabId, browserType);
-
-    recreateDirectory(workerProfileDir);
+    const sessionBot = await ensureBrowserSession(browserType);
+    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const bot = new BotController({
       profileDir: workerProfileDir,
@@ -248,7 +247,7 @@ async function handleAddTab(_event, payload) {
     sendTabStatus(
       tabId,
       "Готово",
-      `${browserType}: вкладка ${nextIndex} відкрита. У цьому вікні треба авторизуватися окремо, відкрити монету та вставити URL у форму.`,
+      `${browserType}: вкладка ${nextIndex} відкрита. Увійди в акаунт у цьому браузері, відкрий монету та встав URL у форму.`,
       "ready",
     );
 
