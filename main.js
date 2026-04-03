@@ -227,12 +227,7 @@ async function handleAddTab(_event, payload) {
     nextTabId += 1;
     const workerProfileDir = getWorkerProfileDir(tabId, browserType);
 
-    const authProfileDir = getAuthProfileDir(browserType);
-    if (fs.existsSync(authProfileDir)) {
-      cloneAuthProfile(workerProfileDir, browserType);
-    } else {
-      recreateDirectory(workerProfileDir);
-    }
+    recreateDirectory(workerProfileDir);
 
     const bot = new BotController({
       profileDir: workerProfileDir,
@@ -253,7 +248,7 @@ async function handleAddTab(_event, payload) {
     sendTabStatus(
       tabId,
       "Готово",
-      `${browserType}: вкладка ${nextIndex} відкрита. Авторизуйся в цьому браузері, відкрий монету та встав URL у форму.`,
+      `${browserType}: вкладка ${nextIndex} відкрита. У цьому вікні треба авторизуватися окремо, відкрити монету та вставити URL у форму.`,
       "ready",
     );
 
