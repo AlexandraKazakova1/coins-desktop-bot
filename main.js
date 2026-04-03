@@ -10,7 +10,6 @@ const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 let win;
 let nextTabId = 1;
 const tabs = new Map();
-const browserSessions = new Map();
 
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
@@ -195,18 +194,8 @@ async function stopAllTabs({ closePages = false } = {}) {
   if (closePages) tabs.clear();
 }
 
-async function stopBrowserSessions() {
-  for (const sessionBot of browserSessions.values()) {
-    await sessionBot.softStop();
-  }
-}
-
 async function closeAll() {
   await stopAllTabs({ closePages: true });
-  for (const sessionBot of browserSessions.values()) {
-    await sessionBot.stop();
-  }
-  browserSessions.clear();
 }
 
 async function handleAddTab(_event, payload) {
@@ -249,19 +238,17 @@ async function handleAddTab(_event, payload) {
     const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const bot = new BotController({
-      profileDir: getAuthProfileDir(browserType),
+      profileDir: workerProfileDir,
       browserType,
-      browser: sessionBot.browser,
-      page: helperTab,
-      ownsBrowser: false,
       onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
     });
+    await bot.openHelperTab("https://coins.bank.gov.ua/");
 
     tabs.set(tabId, {
       id: tabId,
       browserType,
       bot,
-      profileDir: getAuthProfileDir(browserType),
+      profileDir: workerProfileDir,
     });
 
     const nextIndex = tabsForBrowser + 1;
@@ -358,7 +345,6 @@ app.whenReady().then(() => {
   registerIpc("stop", async () => {
     try {
       await stopAllTabs();
-      await stopBrowserSessions();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
