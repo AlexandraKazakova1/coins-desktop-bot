@@ -492,6 +492,7 @@ class BotController {
       ignoreDefaultArgs: ["--enable-automation"],
       args: [
         "--start-maximized",
+        "--new-window",
         "--disable-blink-features=AutomationControlled",
         "--disable-infobars",
       ],
@@ -537,9 +538,7 @@ class BotController {
 
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
     await this._ensurePage();
-
-    const helperTab = await this.browser.newPage();
-    this.page = helperTab;
+    const helperTab = this.page;
     try {
       await helperTab.goto(url, {
         waitUntil: "domcontentloaded",

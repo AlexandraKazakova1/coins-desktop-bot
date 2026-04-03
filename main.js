@@ -10,7 +10,6 @@ const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 let win;
 let nextTabId = 1;
 const tabs = new Map();
-const browserSessions = new Map();
 
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
@@ -179,24 +178,6 @@ function registerIpc(channel, handler) {
   ipcMain.handle(channel, handler);
 }
 
-async function ensureBrowserSession(browserType) {
-  const normalizedType = BROWSER_TYPES.includes(browserType)
-    ? browserType
-    : "chrome";
-
-  const existing = browserSessions.get(normalizedType);
-  if (existing) return existing;
-
-  const sessionBot = new BotController({
-    profileDir: getAuthProfileDir(normalizedType),
-    browserType: normalizedType,
-    onStatus: (s, d, e) => sendStatus(`[${normalizedType}] ${s}`, d, e),
-  });
-
-  browserSessions.set(normalizedType, sessionBot);
-  return sessionBot;
-}
-
 async function ensureTabBot(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
@@ -213,18 +194,8 @@ async function stopAllTabs({ closePages = false } = {}) {
   if (closePages) tabs.clear();
 }
 
-async function stopBrowserSessions() {
-  for (const sessionBot of browserSessions.values()) {
-    await sessionBot.softStop();
-  }
-}
-
 async function closeAll() {
   await stopAllTabs({ closePages: true });
-  for (const sessionBot of browserSessions.values()) {
-    await sessionBot.stop();
-  }
-  browserSessions.clear();
 }
 
 async function handleAddTab(_event, payload) {
@@ -252,26 +223,24 @@ async function handleAddTab(_event, payload) {
       );
     }
 
-    const sessionBot = await ensureBrowserSession(browserType);
-    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
-
     const tabId = nextTabId;
     nextTabId += 1;
+    const workerProfileDir = getWorkerProfileDir(tabId, browserType);
+
+    recreateDirectory(workerProfileDir);
 
     const bot = new BotController({
-      profileDir: getAuthProfileDir(browserType),
+      profileDir: workerProfileDir,
       browserType,
-      browser: sessionBot.browser,
-      page: helperTab,
-      ownsBrowser: false,
       onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
     });
+    await bot.openHelperTab("https://coins.bank.gov.ua/");
 
     tabs.set(tabId, {
       id: tabId,
       browserType,
       bot,
-      profileDir: getAuthProfileDir(browserType),
+      profileDir: workerProfileDir,
     });
 
     const nextIndex = tabsForBrowser + 1;
@@ -279,7 +248,7 @@ async function handleAddTab(_event, payload) {
     sendTabStatus(
       tabId,
       "Готово",
-      `${browserType}: вкладка ${nextIndex} відкрита. Авторизуйся в цьому браузері, відкрий монету та встав URL у форму.`,
+      `${browserType}: вкладка ${nextIndex} відкрита. У цьому вікні треба авторизуватися окремо, відкрити монету та вставити URL у форму.`,
       "ready",
     );
 
@@ -368,7 +337,6 @@ app.whenReady().then(() => {
   registerIpc("stop", async () => {
     try {
       await stopAllTabs();
-      await stopBrowserSessions();
       return { ok: true };
     } catch (e) {
       sendStatus("Помилка", e.message, "error");
@@ -376,20 +344,18 @@ app.whenReady().then(() => {
     }
   });
 
+  registerIpc("auth_v2", async () => {
+    return {
+      ok: false,
+      error:
+        "Канал auth_v2 більше не використовується. Натисни кнопку браузера (Chrome/Opera/Mozilla), щоб відкрити вікно авторизації.",
+    };
+  });
+
   registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
-        auth: authBot ? authBot.getState() : null,
-        tabs: [...tabs.values()].map((t) => ({
-          id: t.id,
-          browserType: t.browserType,
-          ...(t.bot ? t.bot.getState() : {}),
-        })),
-        auth: [...browserSessions.entries()].map(([browserType, bot]) => ({
-          browserType,
-          ...bot.getState(),
-        })),
         tabs: [...tabs.values()].map((t) => ({
           id: t.id,
           browserType: t.browserType,
