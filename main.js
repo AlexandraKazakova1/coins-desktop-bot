@@ -178,6 +178,24 @@ function registerIpc(channel, handler) {
   ipcMain.handle(channel, handler);
 }
 
+async function ensureBrowserSession(browserType) {
+  const normalizedType = BROWSER_TYPES.includes(browserType)
+    ? browserType
+    : "chrome";
+
+  let sessionBot = browserSessions.get(normalizedType);
+  if (!sessionBot) {
+    sessionBot = new BotController({
+      profileDir: getAuthProfileDir(normalizedType),
+      browserType: normalizedType,
+      onStatus: (s, d, e) => sendStatus(`[${normalizedType}] ${s}`, d, e),
+    });
+    browserSessions.set(normalizedType, sessionBot);
+  }
+
+  return sessionBot;
+}
+
 async function ensureTabBot(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) throw new Error("Вкладку не знайдено. Додай вкладку заново.");
@@ -225,15 +243,7 @@ async function handleAddTab(_event, payload) {
 
     const tabId = nextTabId;
     nextTabId += 1;
-    let sessionBot = browserSessions.get(browserType);
-    if (!sessionBot) {
-      sessionBot = new BotController({
-        profileDir: getAuthProfileDir(browserType),
-        browserType,
-        onStatus: (s, d, e) => sendStatus(`[${browserType}] ${s}`, d, e),
-      });
-      browserSessions.set(browserType, sessionBot);
-    }
+    const sessionBot = await ensureBrowserSession(browserType);
 
     const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
