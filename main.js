@@ -243,7 +243,27 @@ async function handleAddTab(_event, payload) {
 
     const tabId = nextTabId;
     nextTabId += 1;
-    const sessionBot = await ensureBrowserSession(browserType);
+    const getSession =
+      typeof ensureBrowserSession === "function"
+        ? ensureBrowserSession
+        : async (type) => {
+            const normalizedType = BROWSER_TYPES.includes(type)
+              ? type
+              : "chrome";
+            let session = browserSessions.get(normalizedType);
+            if (!session) {
+              session = new BotController({
+                profileDir: getAuthProfileDir(normalizedType),
+                browserType: normalizedType,
+                onStatus: (s, d, e) =>
+                  sendStatus(`[${normalizedType}] ${s}`, d, e),
+              });
+              browserSessions.set(normalizedType, session);
+            }
+            return session;
+          };
+
+    const sessionBot = await getSession(browserType);
 
     const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
