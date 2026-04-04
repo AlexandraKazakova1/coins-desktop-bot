@@ -491,6 +491,10 @@ class BotController {
         "--new-window",
         "--disable-blink-features=AutomationControlled",
         "--disable-infobars",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-features=CalculateNativeWinOcclusion",
       ],
     };
 
@@ -934,74 +938,43 @@ class BotController {
     }
   }
 
-  async _waitForBuySignal(timeoutMs = 120) {
+  async _waitForBuySignal(_timeoutMs = 120) {
     if (!this.page) return false;
 
     try {
-      return await this.page.evaluate((timeout) => {
-        const hasBuyCandidate = () => {
-          const controls = [
-            ...document.querySelectorAll("button, a, [role='button']"),
-          ];
-          const buyHints = ["купити", "в кошик", "до кошика", "buy"];
-          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
-          const negativeHints = [
-            "очіку",
-            "незабаром",
-            "розпродано",
-            "немає в наявності",
-            "sold out",
-            "unavailable",
-          ];
+      return await this.page.evaluate(() => {
+        const controls = [...document.querySelectorAll("button, a, [role='button']")];
+        const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+        const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+        const negativeHints = [
+          "очіку",
+          "незабаром",
+          "розпродано",
+          "немає в наявності",
+          "sold out",
+          "unavailable",
+        ];
 
-          return controls.some((el) => {
-            const text = (el.innerText || el.textContent || "").toLowerCase();
-            if (!buyHints.some((hint) => text.includes(hint))) return false;
-            if (inCartHints.some((hint) => text.includes(hint))) return false;
-            if (negativeHints.some((hint) => text.includes(hint))) return false;
+        return controls.some((el) => {
+          const text = (el.innerText || el.textContent || "").toLowerCase();
+          if (!buyHints.some((hint) => text.includes(hint))) return false;
+          if (inCartHints.some((hint) => text.includes(hint))) return false;
+          if (negativeHints.some((hint) => text.includes(hint))) return false;
 
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            const visible =
-              style.display !== "none" &&
-              style.visibility !== "hidden" &&
-              Number(style.opacity || 1) > 0 &&
-              rect.width > 0 &&
-              rect.height > 0;
-            const enabled =
-              !el.hasAttribute("disabled") &&
-              el.getAttribute("aria-disabled") !== "true";
-            return visible && enabled;
-          });
-        };
-
-        if (hasBuyCandidate()) return Promise.resolve(true);
-
-        return new Promise((resolve) => {
-          let doneCalled = false;
-          let timer = null;
-          const done = (result) => {
-            if (doneCalled) return;
-            doneCalled = true;
-            if (observer) observer.disconnect();
-            if (timer) clearTimeout(timer);
-            resolve(result);
-          };
-
-          const observer = new MutationObserver(() => {
-            if (hasBuyCandidate()) done(true);
-          });
-
-          timer = setTimeout(() => done(false), Math.max(30, timeout));
-          observer.observe(document.documentElement || document.body, {
-            subtree: true,
-            childList: true,
-            attributes: true,
-            characterData: true,
-            attributeFilter: ["class", "style", "disabled", "aria-disabled"],
-          });
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0 &&
+            rect.width > 0 &&
+            rect.height > 0;
+          const enabled =
+            !el.hasAttribute("disabled") &&
+            el.getAttribute("aria-disabled") !== "true";
+          return visible && enabled;
         });
-      }, timeoutMs);
+      });
     } catch {
       return false;
     }
