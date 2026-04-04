@@ -266,12 +266,15 @@ async function handleAddTab(_event, payload) {
 
     const sessionBot = await getSession(browserType);
 
-    await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
+    const workerPage = await sessionBot.createWorkerTab(
+      "https://coins.bank.gov.ua/",
+    );
 
     const bot = new BotController({
       profileDir: getAuthProfileDir(browserType),
       browserType,
       browser: sessionBot.browser,
+      page: workerPage,
       ownsBrowser: false,
       onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
     });
