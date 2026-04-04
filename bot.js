@@ -231,6 +231,44 @@ class BotController {
     this.onStatus(message.title, detail, eventCode);
   }
 
+  async _applyPageRuntimePatches(targetPage) {
+    if (!targetPage) return;
+
+    const patchFn = () => {
+      try {
+        Object.defineProperty(navigator, "webdriver", {
+          get: () => undefined,
+          configurable: true,
+        });
+      } catch {}
+
+      try {
+        Object.defineProperty(document, "hidden", {
+          get: () => false,
+          configurable: true,
+        });
+        Object.defineProperty(document, "visibilityState", {
+          get: () => "visible",
+          configurable: true,
+        });
+      } catch {}
+
+      try {
+        const nativeRaf = window.requestAnimationFrame?.bind(window);
+        window.requestAnimationFrame = (cb) => {
+          if (typeof cb !== "function") return 0;
+          if (nativeRaf && document.visibilityState === "visible") {
+            return nativeRaf(cb);
+          }
+          return window.setTimeout(() => cb(performance.now()), 16);
+        };
+      } catch {}
+    };
+
+    await targetPage.evaluateOnNewDocument(patchFn);
+    await targetPage.evaluate(patchFn).catch(() => {});
+  }
+
   async _focusCoinsTab() {
     if (!this.browser) return false;
 
@@ -531,9 +569,7 @@ class BotController {
     const pages = await this.browser.pages();
     this.page = pages[0] || (await this.browser.newPage());
 
-    await this.page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    });
+    await this._applyPageRuntimePatches(this.page);
   }
 
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
@@ -812,6 +848,7 @@ class BotController {
       this.page = await this.browser.newPage();
 
       await this.page.setViewport({ width: 1280, height: 720 }).catch(() => {});
+      await this._applyPageRuntimePatches(this.page);
       this.page.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
     }
 
@@ -824,9 +861,7 @@ class BotController {
 
     const workerPage = await this.browser.newPage();
     await workerPage.setViewport({ width: 1280, height: 720 }).catch(() => {});
-    await workerPage.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    });
+    await this._applyPageRuntimePatches(workerPage);
     workerPage.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
 
     try {
