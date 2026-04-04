@@ -10,6 +10,7 @@ const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 let win;
 let nextTabId = 1;
 const tabs = new Map();
+const browserSessions = new Map();
 
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
@@ -265,11 +266,13 @@ async function handleAddTab(_event, payload) {
 
     const sessionBot = await getSession(browserType);
 
-    const helperTab = await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
+    await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
 
     const bot = new BotController({
-      profileDir: workerProfileDir,
+      profileDir: getAuthProfileDir(browserType),
       browserType,
+      browser: sessionBot.browser,
+      ownsBrowser: false,
       onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
     });
     await bot.openHelperTab("https://coins.bank.gov.ua/");
@@ -278,7 +281,7 @@ async function handleAddTab(_event, payload) {
       id: tabId,
       browserType,
       bot,
-      profileDir: workerProfileDir,
+      profileDir: getAuthProfileDir(browserType),
     });
 
     const nextIndex = tabsForBrowser + 1;
@@ -382,18 +385,32 @@ app.whenReady().then(() => {
     }
   });
 
-  registerIpc("auth_v2", async () => {
-    return {
-      ok: false,
-      error:
-        "Канал auth_v2 більше не використовується. Натисни кнопку браузера (Chrome/Opera/Mozilla), щоб відкрити вікно авторизації.",
-    };
+  registerIpc("auth_v2", async (_event, payload) => {
+    try {
+      const requestedType = String(
+        (payload && payload.browserType) || "chrome",
+      ).toLowerCase();
+      const browserType = BROWSER_TYPES.includes(requestedType)
+        ? requestedType
+        : "chrome";
+
+      const sessionBot = await ensureBrowserSession(browserType);
+      await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
+
+      return { ok: true, browserType };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   });
 
   registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
+        auth: [...browserSessions.entries()].map(([browserType, bot]) => ({
+          browserType,
+          ...bot.getState(),
+        })),
         tabs: [...tabs.values()].map((t) => ({
           id: t.id,
           browserType: t.browserType,
