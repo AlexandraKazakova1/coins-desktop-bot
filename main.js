@@ -10,6 +10,7 @@ const BROWSER_TYPES = ["chrome", "opera", "firefox"];
 let win;
 let nextTabId = 1;
 const tabs = new Map();
+const browserSessions = new Map();
 
 function parseTabs(rawTabs) {
   const tabsCount = Number(rawTabs);
