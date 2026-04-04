@@ -382,18 +382,32 @@ app.whenReady().then(() => {
     }
   });
 
-  registerIpc("auth_v2", async () => {
-    return {
-      ok: false,
-      error:
-        "Канал auth_v2 більше не використовується. Натисни кнопку браузера (Chrome/Opera/Mozilla), щоб відкрити вікно авторизації.",
-    };
+  registerIpc("auth_v2", async (_event, payload) => {
+    try {
+      const requestedType = String(
+        (payload && payload.browserType) || "chrome",
+      ).toLowerCase();
+      const browserType = BROWSER_TYPES.includes(requestedType)
+        ? requestedType
+        : "chrome";
+
+      const sessionBot = await ensureBrowserSession(browserType);
+      await sessionBot.openHelperTab("https://coins.bank.gov.ua/");
+
+      return { ok: true, browserType };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   });
 
   registerIpc("getStatus", async () => {
     return {
       ok: true,
       state: {
+        auth: [...browserSessions.entries()].map(([browserType, bot]) => ({
+          browserType,
+          ...bot.getState(),
+        })),
         tabs: [...tabs.values()].map((t) => ({
           id: t.id,
           browserType: t.browserType,
