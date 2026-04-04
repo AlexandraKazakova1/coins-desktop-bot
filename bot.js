@@ -211,6 +211,7 @@ class BotController {
     this.refreshAttemptsWithoutButton = 0;
     this.domProbeTick = 0;
     this.lastBuySignalAt = 0;
+    this.signedOutStreak = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
@@ -558,6 +559,7 @@ class BotController {
 
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
     await this._ensurePage();
+    this.signedOutStreak = 0;
     const helperTab = this.page;
     try {
       await helperTab.goto(url, {
@@ -652,24 +654,23 @@ class BotController {
       if (authUrlHints.some((hint) => currentUrl.includes(hint))) return true;
 
       return await this.page.evaluate(() => {
-        const text = (document.body?.innerText || "").toLowerCase();
-        const signedOutHints = [
-          "увійти",
-          "вхід",
-          "авторизація",
-          "не авториз",
-          "будь ласка, увійдіть",
-          "sign in",
-          "log in",
-        ];
-        const signedInHints = ["вийти", "профіль", "кабінет", "мої замовлення"];
-
-        const hasSignedOutHint = signedOutHints.some((hint) =>
-          text.includes(hint),
+        const hasPasswordInput = !!document.querySelector(
+          "input[type='password']",
         );
-        const hasSignedInHint = signedInHints.some((hint) => text.includes(hint));
+        const hasLoginForm = !!document.querySelector(
+          "form[action*='login' i], form[action*='signin' i], form[action*='auth' i]",
+        );
+        const hasAuthSubmit = [...document.querySelectorAll("button, a")]
+          .map((el) => (el.textContent || "").toLowerCase().trim())
+          .some(
+            (text) =>
+              text === "увійти" ||
+              text === "вхід" ||
+              text === "sign in" ||
+              text === "log in",
+          );
 
-        return hasSignedOutHint && !hasSignedInHint;
+        return hasPasswordInput || hasLoginForm || hasAuthSubmit;
       });
     } catch {
       return false;
@@ -1006,6 +1007,7 @@ class BotController {
     const hasStartTime = !!startAtLocal;
 
     await this._ensurePage();
+    this.signedOutStreak = 0;
 
     if (!hasStartTime) {
       if (this.tracking)
@@ -1025,12 +1027,17 @@ class BotController {
 
         const signedOut = await this._isExplicitlySignedOut();
         if (signedOut) {
-          this._status(
-            BOT_STATES.AUTH,
-            "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
-          );
-          this.tracking = false;
-          break;
+          this.signedOutStreak += 1;
+          if (this.signedOutStreak >= 3) {
+            this._status(
+              BOT_STATES.AUTH,
+              "Схоже, сесія справді неактивна. Увійди знову та натисни Старт.",
+            );
+            this.tracking = false;
+            break;
+          }
+        } else {
+          this.signedOutStreak = 0;
         }
 
         // чекаємо появу кнопки через DOM-сигнал + періодичний повний скан
@@ -1132,12 +1139,17 @@ class BotController {
 
       const signedOut = await this._isExplicitlySignedOut();
       if (signedOut) {
-        this._status(
-          BOT_STATES.AUTH,
-          "Сесія неактивна після кліку/оновлення. Увійди знову та натисни Старт.",
-        );
-        this.tracking = false;
-        break;
+        this.signedOutStreak += 1;
+        if (this.signedOutStreak >= 3) {
+          this._status(
+            BOT_STATES.AUTH,
+            "Схоже, сесія справді неактивна. Увійди знову та натисни Старт.",
+          );
+          this.tracking = false;
+          break;
+        }
+      } else {
+        this.signedOutStreak = 0;
       }
 
       const buySignal = await this._waitForBuySignal(120);
