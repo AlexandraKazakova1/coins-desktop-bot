@@ -275,7 +275,6 @@ async function handleAddTab(_event, payload) {
       ownsBrowser: false,
       onStatus: (s, d, e) => sendTabStatus(tabId, s, d, e),
     });
-    await bot.openHelperTab("https://coins.bank.gov.ua/");
 
     tabs.set(tabId, {
       id: tabId,
