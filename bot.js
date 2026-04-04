@@ -243,10 +243,6 @@ class BotController {
 
     this.page = existingCoinsTab;
 
-    try {
-      if (this.page.bringToFront) await this.page.bringToFront();
-    } catch {}
-
     return true;
   }
 
@@ -548,10 +544,6 @@ class BotController {
       await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
     }
 
-    try {
-      if (helperTab.bringToFront) await helperTab.bringToFront();
-    } catch {}
-
     this._status(
       BOT_STATES.AUTH,
       "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.",
@@ -819,13 +811,30 @@ class BotController {
       this.page.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
     }
 
+    return this.page;
+  }
+
+  async createWorkerTab(url = "https://coins.bank.gov.ua/") {
+    await this._browser();
+    if (!this.browser) throw new Error("Browser не ініціалізовано");
+
+    const workerPage = await this.browser.newPage();
+    await workerPage.setViewport({ width: 1280, height: 720 }).catch(() => {});
+    await workerPage.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+    workerPage.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
+
     try {
-      if (this.page.bringToFront) await this.page.bringToFront();
-    } catch (e) {
-      if (!String(e).includes("Session closed")) throw e;
+      await workerPage.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
+      });
+    } catch {
+      await workerPage.goto(url, { waitUntil: "load", timeout: 60000 });
     }
 
-    return this.page;
+    return workerPage;
   }
 
   _isSameTargetUrl(targetUrl) {
