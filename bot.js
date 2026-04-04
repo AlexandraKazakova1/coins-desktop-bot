@@ -243,10 +243,6 @@ class BotController {
 
     this.page = existingCoinsTab;
 
-    try {
-      if (this.page.bringToFront) await this.page.bringToFront();
-    } catch {}
-
     return true;
   }
 
@@ -495,6 +491,10 @@ class BotController {
         "--new-window",
         "--disable-blink-features=AutomationControlled",
         "--disable-infobars",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-features=CalculateNativeWinOcclusion",
       ],
     };
 
@@ -547,10 +547,6 @@ class BotController {
     } catch {
       await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
     }
-
-    try {
-      if (helperTab.bringToFront) await helperTab.bringToFront();
-    } catch {}
 
     this._status(
       BOT_STATES.AUTH,
@@ -819,13 +815,30 @@ class BotController {
       this.page.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
     }
 
+    return this.page;
+  }
+
+  async createWorkerTab(url = "https://coins.bank.gov.ua/") {
+    await this._browser();
+    if (!this.browser) throw new Error("Browser не ініціалізовано");
+
+    const workerPage = await this.browser.newPage();
+    await workerPage.setViewport({ width: 1280, height: 720 }).catch(() => {});
+    await workerPage.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    });
+    workerPage.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
+
     try {
-      if (this.page.bringToFront) await this.page.bringToFront();
-    } catch (e) {
-      if (!String(e).includes("Session closed")) throw e;
+      await workerPage.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 45000,
+      });
+    } catch {
+      await workerPage.goto(url, { waitUntil: "load", timeout: 60000 });
     }
 
-    return this.page;
+    return workerPage;
   }
 
   _isSameTargetUrl(targetUrl) {
@@ -925,74 +938,43 @@ class BotController {
     }
   }
 
-  async _waitForBuySignal(timeoutMs = 120) {
+  async _waitForBuySignal(_timeoutMs = 120) {
     if (!this.page) return false;
 
     try {
-      return await this.page.evaluate((timeout) => {
-        const hasBuyCandidate = () => {
-          const controls = [
-            ...document.querySelectorAll("button, a, [role='button']"),
-          ];
-          const buyHints = ["купити", "в кошик", "до кошика", "buy"];
-          const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
-          const negativeHints = [
-            "очіку",
-            "незабаром",
-            "розпродано",
-            "немає в наявності",
-            "sold out",
-            "unavailable",
-          ];
+      return await this.page.evaluate(() => {
+        const controls = [...document.querySelectorAll("button, a, [role='button']")];
+        const buyHints = ["купити", "в кошик", "до кошика", "buy"];
+        const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
+        const negativeHints = [
+          "очіку",
+          "незабаром",
+          "розпродано",
+          "немає в наявності",
+          "sold out",
+          "unavailable",
+        ];
 
-          return controls.some((el) => {
-            const text = (el.innerText || el.textContent || "").toLowerCase();
-            if (!buyHints.some((hint) => text.includes(hint))) return false;
-            if (inCartHints.some((hint) => text.includes(hint))) return false;
-            if (negativeHints.some((hint) => text.includes(hint))) return false;
+        return controls.some((el) => {
+          const text = (el.innerText || el.textContent || "").toLowerCase();
+          if (!buyHints.some((hint) => text.includes(hint))) return false;
+          if (inCartHints.some((hint) => text.includes(hint))) return false;
+          if (negativeHints.some((hint) => text.includes(hint))) return false;
 
-            const style = window.getComputedStyle(el);
-            const rect = el.getBoundingClientRect();
-            const visible =
-              style.display !== "none" &&
-              style.visibility !== "hidden" &&
-              Number(style.opacity || 1) > 0 &&
-              rect.width > 0 &&
-              rect.height > 0;
-            const enabled =
-              !el.hasAttribute("disabled") &&
-              el.getAttribute("aria-disabled") !== "true";
-            return visible && enabled;
-          });
-        };
-
-        if (hasBuyCandidate()) return Promise.resolve(true);
-
-        return new Promise((resolve) => {
-          let doneCalled = false;
-          let timer = null;
-          const done = (result) => {
-            if (doneCalled) return;
-            doneCalled = true;
-            if (observer) observer.disconnect();
-            if (timer) clearTimeout(timer);
-            resolve(result);
-          };
-
-          const observer = new MutationObserver(() => {
-            if (hasBuyCandidate()) done(true);
-          });
-
-          timer = setTimeout(() => done(false), Math.max(30, timeout));
-          observer.observe(document.documentElement || document.body, {
-            subtree: true,
-            childList: true,
-            attributes: true,
-            characterData: true,
-            attributeFilter: ["class", "style", "disabled", "aria-disabled"],
-          });
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const visible =
+            style.display !== "none" &&
+            style.visibility !== "hidden" &&
+            Number(style.opacity || 1) > 0 &&
+            rect.width > 0 &&
+            rect.height > 0;
+          const enabled =
+            !el.hasAttribute("disabled") &&
+            el.getAttribute("aria-disabled") !== "true";
+          return visible && enabled;
         });
-      }, timeoutMs);
+      });
     } catch {
       return false;
     }
