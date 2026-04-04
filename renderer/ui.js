@@ -4,10 +4,10 @@ const btnStartAll = $("btnStartAll");
 const btnStopAll = $("btnStopAll");
 const btnChrome = $("btnChrome");
 const btnOpera = $("btnOpera");
-const btnFirefox = $("btnFirefox");
+const btnEdge = $("btnEdge");
 const chromeCount = $("chromeCount");
 const operaCount = $("operaCount");
-const firefoxCount = $("firefoxCount");
+const edgeCount = $("edgeCount");
 const startAtInput = $("startAt");
 const tabsList = $("tabsList");
 
@@ -22,7 +22,7 @@ const lastAlertAtByTab = new Map();
 const BROWSER_LABEL = {
   chrome: "Chrome",
   opera: "Opera",
-  firefox: "Mozilla",
+  edge: "Edge",
 };
 
 const STATUS_COLOR = {
@@ -48,11 +48,11 @@ function countTabsByBrowser(type) {
 function updateBrowserCounters() {
   chromeCount.textContent = `${countTabsByBrowser("chrome")}/${MAX_PER_BROWSER} вкладок`;
   operaCount.textContent = `${countTabsByBrowser("opera")}/${MAX_PER_BROWSER} вкладок`;
-  firefoxCount.textContent = `${countTabsByBrowser("firefox")}/${MAX_PER_BROWSER} вкладок`;
+  edgeCount.textContent = `${countTabsByBrowser("edge")}/${MAX_PER_BROWSER} вкладок`;
 
   btnChrome.disabled = countTabsByBrowser("chrome") >= MAX_PER_BROWSER;
   btnOpera.disabled = countTabsByBrowser("opera") >= MAX_PER_BROWSER;
-  btnFirefox.disabled = countTabsByBrowser("firefox") >= MAX_PER_BROWSER;
+  btnEdge.disabled = countTabsByBrowser("edge") >= MAX_PER_BROWSER;
 }
 
 function setDot(status) {
@@ -186,7 +186,7 @@ async function openBrowserTab(browserType) {
 
 btnChrome?.addEventListener("click", async () => openBrowserTab("chrome"));
 btnOpera?.addEventListener("click", async () => openBrowserTab("opera"));
-btnFirefox?.addEventListener("click", async () => openBrowserTab("firefox"));
+btnEdge?.addEventListener("click", async () => openBrowserTab("edge"));
 
 btnStartAll?.addEventListener("click", async () => {
   const tabIds = [...tabsState.keys()];
