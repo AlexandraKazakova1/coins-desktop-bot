@@ -133,12 +133,6 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function hasChromiumProfileMarkers(profileDir) {
-  if (!fs.existsSync(profileDir)) return false;
-  const markers = ["Local State", "First Run", "Default", "Last Version"];
-  return markers.some((name) => fs.existsSync(path.join(profileDir, name)));
-}
-
 function chromePaths() {
   return [
     "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe",
@@ -159,17 +153,20 @@ function operaPaths() {
   ];
 }
 
-function firefoxPaths() {
+function edgePaths() {
   return [
-    "C:\\\\Program Files\\\\Mozilla Firefox\\\\firefox.exe",
-    "C:\\\\Program Files (x86)\\\\Mozilla Firefox\\\\firefox.exe",
-    path.join(process.env.LOCALAPPDATA || "", "Mozilla Firefox\\firefox.exe"),
+    "C:\\\\Program Files (x86)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe",
+    "C:\\\\Program Files\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe",
+    path.join(
+      process.env.LOCALAPPDATA || "",
+      "Microsoft\\Edge\\Application\\msedge.exe",
+    ),
   ];
 }
 
 function resolveBrowserExecutable(browserType) {
   const normalized = String(browserType || "chrome").toLowerCase();
-  const firefoxCandidate = firefoxPaths().find((candidatePath) =>
+  const edgeCandidate = edgePaths().find((candidatePath) =>
     fs.existsSync(candidatePath),
   );
   const chromeCandidate = chromePaths().find((candidatePath) =>
@@ -180,7 +177,7 @@ function resolveBrowserExecutable(browserType) {
   );
 
   if (normalized === "opera") return operaCandidate || chromeCandidate;
-  if (normalized === "firefox") return firefoxCandidate || null;
+  if (normalized === "edge") return edgeCandidate || chromeCandidate;
   return chromeCandidate;
 }
 
@@ -536,25 +533,12 @@ class BotController {
       ],
     };
 
-    const isNativeFirefox = String(executablePath)
-      .toLowerCase()
-      .includes("firefox.exe");
-    if (this.browserType === "firefox" && isNativeFirefox) {
-      if (hasChromiumProfileMarkers(this.profileDir)) {
-        fs.rmSync(this.profileDir, { recursive: true, force: true });
-        fs.mkdirSync(this.profileDir, { recursive: true });
-      }
-      launchOptions.product = "firefox";
-      launchOptions.ignoreDefaultArgs = undefined;
-      launchOptions.args = [];
-    }
-
     try {
       this.browser = await puppeteer.launch(launchOptions);
     } catch (error) {
-      if (this.browserType === "firefox") {
+      if (this.browserType === "edge") {
         throw new Error(
-          `Mozilla Firefox не вдалося запустити: ${error?.message || error}. Перевір встановлений Firefox та його сумісність з DevTools.`,
+          `Microsoft Edge не вдалося запустити: ${error?.message || error}. Перевір встановлений Edge.`,
         );
       }
       throw error;

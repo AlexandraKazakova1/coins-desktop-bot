@@ -5,7 +5,7 @@ const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const { BotController } = require("./bot");
 
 const MAX_PER_BROWSER = 3;
-const BROWSER_TYPES = ["chrome", "opera", "firefox"];
+const BROWSER_TYPES = ["chrome", "opera", "edge"];
 
 let win;
 let nextTabId = 1;
