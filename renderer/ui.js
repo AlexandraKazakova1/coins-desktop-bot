@@ -34,6 +34,8 @@ const STATUS_COLOR = {
   Підготовка: "pending",
   "Очікую старт": "pending",
   "Потрібно ввести капчу": "pending",
+  "Очікує підтвердження Cloudflare": "pending",
+  "Повторна спроба після Cloudflare": "pending",
   "Товар додано в кошик": "success",
   Зупинено: "idle",
   Помилка: "error",
