@@ -212,6 +212,7 @@ class BotController {
     this.domProbeTick = 0;
     this.lastBuySignalAt = 0;
     this.signedOutStreak = 0;
+    this.lastBringToFrontAt = 0;
   }
 
   _status(state, detailOverride = "", eventCodeOverride = "") {
@@ -265,6 +266,12 @@ class BotController {
 
     await targetPage.evaluateOnNewDocument(patchFn);
     await targetPage.evaluate(patchFn).catch(() => {});
+
+    try {
+      const cdp = await targetPage.target().createCDPSession();
+      await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await cdp.send("Page.setWebLifecycleState", { state: "active" }).catch(() => {});
+    } catch {}
   }
 
   async _focusCoinsTab() {
@@ -530,7 +537,7 @@ class BotController {
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
-        "--disable-features=CalculateNativeWinOcclusion",
+        "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling",
       ],
     };
 
@@ -790,9 +797,37 @@ class BotController {
     let lastError = null;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      await this._ensurePageIsForeground(true);
       try {
         await btn.click({ delay: randomBetween(120, 260) });
         return;
+      } catch (err) {
+        lastError = err;
+      }
+
+      try {
+        const clickedViaDom = await btn.evaluate((el) => {
+          if (!el) return false;
+          try {
+            el.dispatchEvent(
+              new MouseEvent("pointerdown", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("pointerup", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
+            );
+            el.click();
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (clickedViaDom) return;
       } catch (err) {
         lastError = err;
       }
@@ -823,6 +858,29 @@ class BotController {
 
     const friendly = humanizeAutomationError(lastError);
     throw new Error(friendly);
+  }
+
+  async _ensurePageIsForeground(force = false) {
+    if (!this.page || this.page.isClosed?.()) return;
+    if (typeof this.page.bringToFront !== "function") return;
+
+    const now = Date.now();
+    const minIntervalMs = 900;
+    if (!force && now - Number(this.lastBringToFrontAt || 0) < minIntervalMs) {
+      return;
+    }
+
+    try {
+      await this.page.bringToFront();
+      await this.page
+        .evaluate(() => {
+          try {
+            window.focus();
+          } catch {}
+        })
+        .catch(() => {});
+      this.lastBringToFrontAt = now;
+    } catch {}
   }
 
   async _ensurePage() {
@@ -1019,6 +1077,7 @@ class BotController {
       await this._openTargetIfNeeded(url);
 
       while (this.tracking) {
+        await this._ensurePageIsForeground();
         const waitedChallenge = await this._waitChallengeIfVisible();
         if (waitedChallenge) {
           await sleep(60);
@@ -1131,6 +1190,7 @@ class BotController {
     this._status(BOT_STATES.WAIT_BUY, "Старт! Очікую появу кнопки “Купити”");
 
     while (this.tracking) {
+      await this._ensurePageIsForeground();
       const waitedChallenge = await this._waitChallengeIfVisible();
       if (waitedChallenge) {
         await sleep(80);
