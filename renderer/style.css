@@ -67,6 +67,25 @@ h1 {
   gap: 10px;
   margin-bottom: 8px;
 }
+.tabActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tabCloseBtn {
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  border-color: #5f2634;
+  background: #241018;
+  font-size: 18px;
+  line-height: 1;
+}
+.tabCloseBtn:hover {
+  background: #341420;
+}
 .tabStatus {
   font-size: 13px;
   opacity: 0.95;
