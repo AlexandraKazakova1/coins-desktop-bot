@@ -998,7 +998,7 @@ class BotController {
       return false;
     }
 
-    this.refreshInFlight = true;
+    // this.re freshInFlight = true;
     this.refreshLimiter.mark(now);
     this.lastRefreshAt = now;
 
@@ -1021,7 +1021,9 @@ class BotController {
 
     try {
       return await this.page.evaluate(() => {
-        const controls = [...document.querySelectorAll("button, a, [role='button']")];
+        const controls = [
+          ...document.querySelectorAll("button, a, [role='button']"),
+        ];
         const buyHints = ["купити", "в кошик", "до кошика", "buy"];
         const inCartHints = ["у кошику", "в кошику", "перейти до кошика"];
         const negativeHints = [
