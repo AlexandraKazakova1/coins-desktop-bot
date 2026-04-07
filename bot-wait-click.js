@@ -25,7 +25,7 @@ class WaitClickBot {
     this.started = false;
   }
 
-  async waitAndClickBuy({ timeoutMs = 120000, pollMs = 50 } = {}) {
+  async waitAndClickBuy({ timeoutMs = 120000, pollMs = 20 } = {}) {
     if (!this.started) {
       throw new Error("Бот не запущен. Сначала вызови start().");
     }
@@ -214,13 +214,18 @@ class WaitClickBot {
 
   async _clickNow(buttonHandle) {
     try {
+      await buttonHandle.evaluate((el) => el.click());
+      return;
+    } catch {}
+
+    try {
       await buttonHandle.evaluate((el) =>
         el.scrollIntoView({ block: "center", inline: "center" }),
       );
     } catch {}
 
     try {
-      await buttonHandle.click({ delay: 10 });
+      await buttonHandle.click({ delay: 0 });
       return;
     } catch {}
 
@@ -228,7 +233,7 @@ class WaitClickBot {
     if (!box)
       throw new Error('Не удалось кликнуть "Купить": кнопка недоступна.');
     await this.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, {
-      delay: 10,
+      delay: 0,
     });
   }
 }
