@@ -1,4 +1,3 @@
-const fs = require("fs");
 const path = require("path");
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 
@@ -27,83 +26,6 @@ function getAuthProfileDir(browserType) {
     "chrome-profiles",
     `authorized-${browserType}`,
   );
-}
-
-function getWorkerProfileDir(tabId, browserType) {
-  return path.join(
-    app.getPath("userData"),
-    "chrome-profiles",
-    `${browserType}-browser-${tabId}`,
-  );
-}
-
-function recreateDirectory(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(dir, { recursive: true });
-}
-
-function isIgnorableCopyError(error) {
-  const code = String(error?.code || "").toUpperCase();
-  return ["EBUSY", "EPERM", "EACCES", "ENOENT"].includes(code);
-}
-
-function copyDirectoryLoose(srcDir, dstDir, shouldCopy) {
-  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
-  for (const entry of entries) {
-    const srcPath = path.join(srcDir, entry.name);
-    const dstPath = path.join(dstDir, entry.name);
-    if (!shouldCopy(srcPath)) continue;
-
-    if (entry.isDirectory()) {
-      fs.mkdirSync(dstPath, { recursive: true });
-      copyDirectoryLoose(srcPath, dstPath, shouldCopy);
-      continue;
-    }
-
-    if (!entry.isFile()) continue;
-
-    try {
-      fs.copyFileSync(srcPath, dstPath);
-    } catch (error) {
-      if (isIgnorableCopyError(error)) continue;
-      throw error;
-    }
-  }
-}
-
-function cloneAuthProfile(workerProfileDir, browserType) {
-  const authProfile = getAuthProfileDir(browserType);
-  if (!fs.existsSync(authProfile)) {
-    throw new Error(
-      `Для ${browserType} ще немає авторизації. Натисни кнопку цього браузера та увійди в акаунт.`,
-    );
-  }
-
-  recreateDirectory(workerProfileDir);
-
-  const skipLockedFiles = (src) => {
-    const normalized = String(src || "").toLowerCase();
-    if (normalized.includes("singletonlock")) return false;
-    if (normalized.endsWith(`${path.sep}lock`)) return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies`))
-      return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
-      return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies`))
-      return false;
-    if (normalized.includes(`${path.sep}network${path.sep}cookies-journal`))
-      return false;
-    if (normalized.includes("safe browsing")) return false;
-    if (normalized.includes("safebrowsing")) return false;
-    if (normalized.includes(`${path.sep}sessions${path.sep}`)) return false;
-    if (normalized.endsWith(`${path.sep}sessions`)) return false;
-    if (normalized.includes(`${path.sep}cache${path.sep}`)) return false;
-    if (normalized.includes(`${path.sep}code cache${path.sep}`)) return false;
-    if (normalized.includes("shadercache")) return false;
-    return true;
-  };
-
-  copyDirectoryLoose(authProfile, workerProfileDir, skipLockedFiles);
 }
 
 function sendStatus(status, detail = "", eventCode = "") {
@@ -244,27 +166,7 @@ async function handleAddTab(_event, payload) {
 
     const tabId = nextTabId;
     nextTabId += 1;
-    const getSession =
-      typeof ensureBrowserSession === "function"
-        ? ensureBrowserSession
-        : async (type) => {
-            const normalizedType = BROWSER_TYPES.includes(type)
-              ? type
-              : "chrome";
-            let session = browserSessions.get(normalizedType);
-            if (!session) {
-              session = new BotController({
-                profileDir: getAuthProfileDir(normalizedType),
-                browserType: normalizedType,
-                onStatus: (s, d, e) =>
-                  sendStatus(`[${normalizedType}] ${s}`, d, e),
-              });
-              browserSessions.set(normalizedType, session);
-            }
-            return session;
-          };
-
-    const sessionBot = await getSession(browserType);
+    const sessionBot = await ensureBrowserSession(browserType);
 
     const workerPage = await sessionBot.createWorkerTab(
       "https://coins.bank.gov.ua/",

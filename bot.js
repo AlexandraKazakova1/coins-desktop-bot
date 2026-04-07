@@ -565,9 +565,15 @@ class BotController {
   }
 
   async openHelperTab(url = "https://coins.bank.gov.ua/") {
-    await this._ensurePage();
+    await this._browser();
+    if (!this.browser) throw new Error("Browser не ініціалізовано");
+
     this.signedOutStreak = 0;
-    const helperTab = this.page;
+    const helperTab = await this.browser.newPage();
+    await helperTab.setViewport({ width: 1280, height: 720 }).catch(() => {});
+    await this._applyPageRuntimePatches(helperTab);
+    helperTab.on("close", () => this._status(BOT_STATES.PAGE_CLOSED));
+
     try {
       await helperTab.goto(url, {
         waitUntil: "domcontentloaded",
@@ -577,6 +583,7 @@ class BotController {
       await helperTab.goto(url, { waitUntil: "load", timeout: 60000 });
     }
 
+    this.page = helperTab;
     this._status(
       BOT_STATES.AUTH,
       "Відкрито нову вкладку. Скопіюй посилання та встав у поле вкладки.",

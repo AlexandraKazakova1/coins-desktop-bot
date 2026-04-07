@@ -1,5 +1,3 @@
-const puppeteer = require("puppeteer-core");
-
 const BUY_SELECTORS = [
   "button.btn-primary.buy",
   "button.buy",
