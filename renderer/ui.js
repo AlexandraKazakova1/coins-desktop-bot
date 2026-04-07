@@ -107,7 +107,10 @@ function renderTab(tabId) {
   card.innerHTML = `
     <div class="tabRow">
       <strong>${BROWSER_LABEL[tab.browserType] || "Браузер"} • Вкладка ${tabNumberInBrowser}</strong>
-      <button class="danger" data-action="stop">Зупинити</button>
+      <div class="tabActions">
+        <button class="danger" data-action="stop">Зупинити</button>
+        <button class="tabCloseBtn" data-action="remove" title="Закрити вкладку">✕</button>
+      </div>
     </div>
     <input data-role="url" placeholder="https://coins.bank.gov.ua/..." value="${tab.url || ""}" />
     <div class="tabRow">
@@ -136,6 +139,40 @@ function renderTab(tabId) {
 
   card.querySelector('[data-action="stop"]').addEventListener("click", async () => {
     await invokeApi(() => window.api.stopTab({ tabId }));
+  });
+
+  card.querySelector('[data-action="remove"]').addEventListener("click", async () => {
+    const r = await invokeApi(() => window.api.removeTab({ tabId }));
+    if (!r?.ok) {
+      updateTabStatus(
+        tabId,
+        "Помилка",
+        r?.error || "Не вдалося закрити вкладку",
+        "error",
+      );
+      return;
+    }
+
+    tabsState.delete(tabId);
+    lastAlertAtByTab.delete(tabId);
+    const currentCard = $(`tab-card-${tabId}`);
+    if (currentCard) currentCard.remove();
+
+    updateBrowserCounters();
+
+    const browserType = tab.browserType;
+    statusTitle.textContent = "Вкладку видалено";
+    statusDetail.textContent = `${
+      BROWSER_LABEL[browserType] || "Браузер"
+    }: залишилось ${countTabsByBrowser(browserType)}/${MAX_PER_BROWSER} вкладок.`;
+    setDot("Готово");
+
+    const sorted = [...tabsState.values()]
+      .filter((item) => item.browserType === browserType)
+      .sort((a, b) => a.id - b.id);
+    for (const item of sorted) {
+      renderTab(item.id);
+    }
   });
 
   const existing = $(card.id);

@@ -353,6 +353,28 @@ async function handleStartAllTabs(_event, payload) {
   }
 }
 
+async function handleRemoveTab(_event, payload) {
+  try {
+    const tabId = Number(payload && payload.tabId);
+    if (!Number.isFinite(tabId)) {
+      throw new Error("Некоректний ідентифікатор вкладки.");
+    }
+
+    const tab = tabs.get(tabId);
+    if (!tab || !tab.bot) {
+      tabs.delete(tabId);
+      return { ok: true, tabId };
+    }
+
+    await tab.bot.stop();
+    tabs.delete(tabId);
+
+    return { ok: true, tabId };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -376,6 +398,7 @@ app.whenReady().then(() => {
       return { ok: false, error: e.message };
     }
   });
+  registerIpc("removeTab", handleRemoveTab);
 
   registerIpc("stop", async () => {
     try {

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("api", {
   startTab: (payload) => ipcRenderer.invoke("startTab_v2", payload),
   startAllTabs: (payload) => ipcRenderer.invoke("startAllTabs_v2", payload),
   stopTab: (payload) => ipcRenderer.invoke("stopTab", payload),
+  removeTab: (payload) => ipcRenderer.invoke("removeTab", payload),
   stop: () => ipcRenderer.invoke("stop"),
   onStatus: (cb) => {
     const handler = (_, data) => cb(data);
