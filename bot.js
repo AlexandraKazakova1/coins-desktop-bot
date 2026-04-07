@@ -266,6 +266,12 @@ class BotController {
 
     await targetPage.evaluateOnNewDocument(patchFn);
     await targetPage.evaluate(patchFn).catch(() => {});
+
+    try {
+      const cdp = await targetPage.target().createCDPSession();
+      await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await cdp.send("Page.setWebLifecycleState", { state: "active" }).catch(() => {});
+    } catch {}
   }
 
   async _focusCoinsTab() {
@@ -531,7 +537,7 @@ class BotController {
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
-        "--disable-features=CalculateNativeWinOcclusion",
+        "--disable-features=CalculateNativeWinOcclusion,IntensiveWakeUpThrottling",
       ],
     };
 
@@ -800,6 +806,33 @@ class BotController {
       }
 
       try {
+        const clickedViaDom = await btn.evaluate((el) => {
+          if (!el) return false;
+          try {
+            el.dispatchEvent(
+              new MouseEvent("pointerdown", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("pointerup", { bubbles: true, cancelable: true }),
+            );
+            el.dispatchEvent(
+              new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
+            );
+            el.click();
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        if (clickedViaDom) return;
+      } catch (err) {
+        lastError = err;
+      }
+
+      try {
         const box = await btn.boundingBox();
         if (box) {
           await this.page.mouse.click(
@@ -839,6 +872,13 @@ class BotController {
 
     try {
       await this.page.bringToFront();
+      await this.page
+        .evaluate(() => {
+          try {
+            window.focus();
+          } catch {}
+        })
+        .catch(() => {});
       this.lastBringToFrontAt = now;
     } catch {}
   }
